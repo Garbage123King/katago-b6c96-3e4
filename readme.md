@@ -1,5 +1,5 @@
 ```
-gcc main.c -o main -lz
+gcc -g main.c checkresult.c -o main -lz
 
 ./main.c
 ```
