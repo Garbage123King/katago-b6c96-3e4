@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 ```
 gcc -g main.c checkresult.c -o main -lz
 
@@ -13,3 +14,10 @@ If you want to run 3D demo:
 gcc demo.c -o demo.exe -L. -lraylibdll -lopengl32 -lgdi32 -lwinmm -mwindows
 ./demo
 ```
+=======
+```
+gcc -g main.c checkresult.c -o main -lz
+
+./main.c
+```
+>>>>>>> Stashed changes
