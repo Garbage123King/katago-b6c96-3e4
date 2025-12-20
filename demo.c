@@ -1,6 +1,14 @@
 // raylib_example.c - 完整实现你的所有需求
 #include "raylib.h"
 
+void DrawCubeWithWireframe(Vector3 position, float width, float height, float length, Color color, Color wireColor) {
+    // 绘制实体立方体
+    DrawCube(position, width, height, length, color);
+    
+    // 绘制线框（稍微大一点，作为边框）
+    DrawCubeWires(position, width, height, length, wireColor);
+}
+
 int main() {
     // 初始化窗口 - 一行代码
     InitWindow(800, 600, "Simple3dQube");
@@ -14,7 +22,7 @@ int main() {
     camera.projection = CAMERA_PERSPECTIVE;
     
     // 创建3D方块模型
-    Vector3 cubePosition = { 0.0f, 0.0f, 0.0f };
+    Vector3 ORIGIN = { 0.0f, 0.0f, 0.0f };
     
     // 加载字体（内置默认字体）
     Font font = GetFontDefault();
@@ -43,16 +51,13 @@ int main() {
                 DrawGrid(10, 1.0f);
                 
                 // 绘制3D方块 - 带光照
-                DrawCube(cubePosition, 2.0f, 2.0f, 2.0f, RED);
-                DrawCubeWires(cubePosition, 2.0f, 2.0f, 2.0f, MAROON);
+                DrawCubeWithWireframe(ORIGIN, 2.0f, 2.0f, 2.0f, RED, MAROON);
                 
-                // 绘制旋转的方块
-                DrawCube((Vector3){4.0f, 0.0f, 0.0f}, 1.0f, 1.0f, 1.0f, BLUE);
-                DrawCubeWires((Vector3){4.0f, 0.0f, 0.0f}, 1.0f, 1.0f, 1.0f, DARKBLUE);
+                // 绘制小方块
+                DrawCubeWithWireframe((Vector3){4.0f, 0.0f, 0.0f}, 1.0f, 1.0f, 1.0f, BLUE, DARKBLUE);
                 
-                // 绘制金字塔
-                DrawCube((Vector3){-4.0f, 0.0f, 0.0f}, 1.5f, 3.0f, 1.5f, GREEN);
-                DrawCubeWires((Vector3){-4.0f, 0.0f, 0.0f}, 1.5f, 3.0f, 1.5f, DARKGREEN);
+                // 绘制高塔
+                DrawCubeWithWireframe((Vector3){-4.0f, 0.0f, 0.0f}, 1.5f, 3.0f, 1.5f, GREEN, DARKGREEN);
                 
             EndMode3D();
             
