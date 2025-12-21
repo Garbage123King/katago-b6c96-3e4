@@ -112,6 +112,11 @@ NULL, 4004034, 51, 4004085, 0, NULL
 
 extern const float trunkScratch[96][19][19];
 extern const float input[22][19][19];
+extern const float inputGlobal[19];
+extern const float inputMatMulOut[96];
+extern const float trunkScratch_afterBias[96][19][19];
+extern const float afternorm[96][19][19];
+extern const float afterconv[96][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -148,7 +153,7 @@ int float_cmp(const void* a, const void* b) {
     else return 0;
 }
 
-float focus(float input[22][3][3], float kernel[22][3][3])
+float focus2296(float input[22][3][3], float kernel[22][3][3])
 {
   float s = 0.0f;
   for(int i =0; i<22; i++)
@@ -168,7 +173,7 @@ float focus(float input[22][3][3], float kernel[22][3][3])
   return s;
 }
 
-void fries(float input_padded[22][21][21], float output[22][3][3], int x, int y)
+void fries2296(float input_padded[22][21][21], float output[22][3][3], int x, int y)
 {
   for(int i=0; i<22; i++)
   {
@@ -187,7 +192,7 @@ void fries(float input_padded[22][21][21], float output[22][3][3], int x, int y)
 
 }
 
-void slip(const float input[22][19][19], float output[19][19], float kernel[22][3][3])
+void slip2296(const float input[22][19][19], float output[19][19], float kernel[22][3][3])
 {
   // padding
   float input_padded[22][19+1+1][19+1+1] = {0};
@@ -207,49 +212,148 @@ void slip(const float input[22][19][19], float output[19][19], float kernel[22][
     for(int j=0; j<19; j++)
     {
       float fry[22][3][3];
-      fries(input_padded, fry, i, j);
-      output[i][j] = focus(fry, kernel);
+      fries2296(input_padded, fry, i, j);
+      output[i][j] = focus2296(fry, kernel);
     }
   }
 }
 
-void calc0(const float input[22][19][19], float output[96][19][19], float kernel[96][22][3][3])
+void conv2296(const float input[22][19][19], float output[96][19][19], float kernel[96][22][3][3])
 {
-  float s = 0.0f;
-  printf("kernel: %f, %f, %f\n", kernel[0][1][0][0] , kernel[0][1][0][1] , kernel[0][1][0][2]);
-  printf("kernel: %f, %f, %f\n", kernel[0][1][1][0] , kernel[0][1][1][1] , kernel[0][1][1][2]);
-  printf("kernel: %f, %f, %f\n\n", kernel[0][1][2][0] , kernel[0][1][2][1] , kernel[0][1][2][2]);
-
   for (int I=0; I<96; I++)
   {
     float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    if(I==93)
-    {
-      volatile int aww;
-      aww=555;
-    }
-    slip(input, output[I], cannon);
+    slip2296(input, output[I], cannon);
   }
 }
 
-float err(float mat1[96][19][19], const float mat2[96][19][19], float *maxdiff, int *oi, int *oj, int *ok)
+float focus9696(float input[96][3][3], float kernel[96][3][3])
+{
+  float s = 0.0f;
+  for(int i =0; i<96; i++)
+  {
+    for(int j=0; j<3; j++)
+    {
+      for(int k=0; k<3; k++)
+      {
+        if(input[i][j][k] > 1000000.0f || kernel[i][j][k] > 1000000.0f)
+        {
+          printf("warning! big number");
+        }
+        s += input[i][j][k] * kernel[i][j][k];
+      }
+    }
+  }
+  return s;
+}
+
+void fries9696(float input_padded[96][21][21], float output[96][3][3], int x, int y)
+{
+  for(int i=0; i<96; i++)
+  {
+    for(int j=0; j<3; j++)
+    {
+      for(int k=0; k<3; k++)
+      {
+        output[i][j][k] = input_padded[i][x+j][y+k];
+        if(output[i][j][k] > 1000000.0f)
+        {
+          printf("warning! big number");
+        }
+      }
+    }
+  }
+
+}
+
+void slip9696(const float input[96][19][19], float output[19][19], float kernel[96][3][3])
+{
+  // padding
+  float input_padded[96][19+1+1][19+1+1] = {0};
+  for(int i=0; i<96; i++)
+  {
+    for(int j=0; j<19; j++)
+    {
+      for(int k=0; k<19; k++)
+      {
+        input_padded[i][j+1][k+1] = input[i][j][k];
+      }
+    }
+  }
+  // conv
+  for(int i=0; i<19; i++)
+  {
+    for(int j=0; j<19; j++)
+    {
+      float fry[96][3][3];
+      fries9696(input_padded, fry, i, j);
+      output[i][j] = focus9696(fry, kernel);
+    }
+  }
+}
+
+void conv9696(const float input[96][19][19], float output[96][19][19], float kernel[96][96][3][3])
+{
+  for (int I=0; I<96; I++)
+  {
+    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
+    slip9696(input, output[I], cannon);
+  }
+}
+
+float err1(float *mat1, const float *mat2, int x, float *maxdiff, int *oi)
 {
   float s = 0.0f;
   float max_diff = -999.0f;
-  for (int i=0; i<96; i++)
-    for (int j=0; j<19; j++)
-      for (int k=0; k<19; k++)
+  for (int i=0; i<x; i++)
+  {
+    float a = mat1[i] - mat2[i];
+    float diff;
+    if(a > 0)
+      diff = a;
+    else
+      diff = -a;
+  
+    if(diff > 0.1)
+    {
+      printf("error: diff too big!! %d: %f\n", i, diff);
+      exit(EXIT_FAILURE);
+    }
+  
+    s += diff;
+    if(diff > max_diff)
+    {
+      max_diff=diff;
+      *oi = i;
+    }
+    if(s>1000000.0f)
+    {
+      printf("warning! big number");
+    }
+  }
+  *maxdiff = max_diff;
+  return s;
+}
+
+float err3(float *mat1, const float *mat2, int x, int y, int z, float *maxdiff, int *oi, int *oj, int *ok)
+{
+  float s = 0.0f;
+  float max_diff = -999.0f;
+  for (int i=0; i<x; i++)
+    for (int j=0; j<y; j++)
+      for (int k=0; k<z; k++)
       {
-        float a = mat1[i][j][k] - mat2[i][j][k];
+        int idx = i * y * z + j * z + k;
+        float a = mat1[idx] - mat2[idx];
         float diff;
         if(a > 0)
           diff = a;
         else
           diff = -a;
 
-        if(diff > 0.1)
+        if(diff > 0.001)
         {
-          printf("error: diff too big!! %d, %d, %d: %f\n", i, j, k, diff);
+          printf("error: diff too big!! %d, (%d, %d): output: %f, standard: %f, diff: %f\n", i, j, k, mat1[idx], mat2[idx], diff);
           exit(EXIT_FAILURE);
         }
 
@@ -268,6 +372,42 @@ float err(float mat1[96][19][19], const float mat2[96][19][19], float *maxdiff, 
       }
   *maxdiff = max_diff;
   return s;
+}
+
+void calc1(const float input[19], float output[96], float linear[96][19])
+{
+  for (int i = 0; i < 96; i++) {
+    float sum = 0.0f;
+    for (int j = 0; j < 19; j++) {
+        sum += linear[i][j] * input[j];
+    }
+    output[i] = sum;
+  }
+}
+
+void calcBias(const float input[96][19][19], float output[96][19][19], float bias[96])
+{
+  for (int i = 0; i < 96; i++) {
+    for (int j = 0; j < 19; j++) 
+      for (int k = 0; k < 19; k++){
+
+          output[i][j][k] = input[i][j][k] + bias[i];
+      }
+  }
+}
+
+void norm(const float input[22][19][19], float output[96][19][19], float scale[96], float bias[96])
+{
+    for (int i = 0; i < 96; i++) {
+      for (int j = 0; j < 19; ++j) {
+        for (int k = 0; k < 19; ++k) {
+          float x = input[i][j][k] * scale[i] + bias[i];
+          output[i][j][k] = (x > 0.0f) ? x : 0.0f;
+
+          // 小棋盘注意过滤掉不在棋盘上的点
+          }
+        }
+    }
 }
 
 int main() {
@@ -402,8 +542,8 @@ int main() {
     printf("========\ntotal float amount: %zu, total min:%.6f, total max:%.6f\n", total_floats, total_min, total_max);
     fclose(fp);
 
-    float output[96][19][19];
-    float kernel[96][22][3][3];
+    float output0[96][19][19];
+    float kernel0[96][22][3][3];
     int n = 0;
  
     for(int k=0; k <3; k++)
@@ -411,16 +551,92 @@ int main() {
         for(int j=0; j <22; j++)
           for(int i=0; i <96; i++)
           {
-            kernel[i][j][k][l] = BINS[0].floats[n++];
+            kernel0[i][j][k][l] = BINS[0].floats[n++];
           }
-    calc0(input, output, kernel);
+    conv2296(input, output0, kernel0);
 
     float maxdiff;
     int erri, errj, errk;
-    
-    // -8.779627, -0.243356
-    printf("sumdiff: %f\n", err(output, trunkScratch, &maxdiff, &erri, &errj, &errk));
+
+    printf("sumdiff: %f\n", err3((float*)output0, (const float*)trunkScratch, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
 
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+
+    float output1[96];
+    float linear0[96][19];
+    n=0;
+
+    for(int j=0; j <19; j++)
+      for(int i=0; i < 96; i++)
+      {
+        linear0[i][j] = BINS[1].floats[n++];
+      }
+
+    calc1(inputGlobal, output1, linear0);
+
+    
+    printf("sumdiff: %f\n", err1((float*)output1, (const float*)inputMatMulOut, 96, &maxdiff, &erri));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+    float output2[96][19][19];
+    calcBias(output0, output2, output1);
+
+    printf("sumdiff: %f\n", err3((float*)output2, (const float*)trunkScratch_afterBias, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    // block阶段
+    
+    // BINS[2]全是0，也没用到，跳过
+
+
+    float output3[96][19][19];
+    float scale0[96];
+    float bias0[96];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale0[i] = BINS[3].floats[n];
+      bias0[i] = BINS[4].floats[n];
+      n++;
+    }
+
+    norm(output2, output3, scale0, bias0);
+    printf("sumdiff: %f\n", err3((float*)output3, (const float*)afternorm, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+    float output4[96][19][19];
+    float kernel1[96][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel1[i][j][k][l] = BINS[5].floats[n++];
+          }
+
+    conv9696(output3, output4, kernel1);
+    printf("sumdiff: %f\n", err3((float*)output4, (const float*)afterconv, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+    // BINS[6]全是0，也没用到，跳过
+
+
+
+
+
+
+
     return 0;
 }
