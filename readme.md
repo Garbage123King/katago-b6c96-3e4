@@ -1,5 +1,5 @@
 ```
-gcc -g main.c checkresult.c -o main -lz
+gcc -g main.c checkresult.c -o main -lz -Wl,--stack,67108864
 
 ./main
 ```

@@ -117,6 +117,11 @@ extern const float inputMatMulOut[96];
 extern const float trunkScratch_afterBias[96][19][19];
 extern const float afternorm[96][19][19];
 extern const float afterconv[96][19][19];
+extern const float after_second_norm_norm[96][19][19];
+extern const float after2norms[96][19][19];
+extern const float after2ordis[96][19][19];
+extern const float regularOut[64][19][19];
+extern const float gpoolOut2[32][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -153,7 +158,7 @@ int float_cmp(const void* a, const void* b) {
     else return 0;
 }
 
-float focus2296(float input[22][3][3], float kernel[22][3][3])
+float focus22(float input[22][3][3], float kernel[22][3][3])
 {
   float s = 0.0f;
   for(int i =0; i<22; i++)
@@ -173,7 +178,7 @@ float focus2296(float input[22][3][3], float kernel[22][3][3])
   return s;
 }
 
-void fries2296(float input_padded[22][21][21], float output[22][3][3], int x, int y)
+void fries22(float input_padded[22][21][21], float output[22][3][3], int x, int y)
 {
   for(int i=0; i<22; i++)
   {
@@ -192,7 +197,7 @@ void fries2296(float input_padded[22][21][21], float output[22][3][3], int x, in
 
 }
 
-void slip2296(const float input[22][19][19], float output[19][19], float kernel[22][3][3])
+void slip22(const float input[22][19][19], float output[19][19], float kernel[22][3][3])
 {
   // padding
   float input_padded[22][19+1+1][19+1+1] = {0};
@@ -212,8 +217,8 @@ void slip2296(const float input[22][19][19], float output[19][19], float kernel[
     for(int j=0; j<19; j++)
     {
       float fry[22][3][3];
-      fries2296(input_padded, fry, i, j);
-      output[i][j] = focus2296(fry, kernel);
+      fries22(input_padded, fry, i, j);
+      output[i][j] = focus22(fry, kernel);
     }
   }
 }
@@ -223,11 +228,11 @@ void conv2296(const float input[22][19][19], float output[96][19][19], float ker
   for (int I=0; I<96; I++)
   {
     float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip2296(input, output[I], cannon);
+    slip22(input, output[I], cannon);
   }
 }
 
-float focus9696(float input[96][3][3], float kernel[96][3][3])
+float focus96(float input[96][3][3], float kernel[96][3][3])
 {
   float s = 0.0f;
   for(int i =0; i<96; i++)
@@ -247,7 +252,7 @@ float focus9696(float input[96][3][3], float kernel[96][3][3])
   return s;
 }
 
-void fries9696(float input_padded[96][21][21], float output[96][3][3], int x, int y)
+void fries96(float input_padded[96][21][21], float output[96][3][3], int x, int y)
 {
   for(int i=0; i<96; i++)
   {
@@ -266,7 +271,7 @@ void fries9696(float input_padded[96][21][21], float output[96][3][3], int x, in
 
 }
 
-void slip9696(const float input[96][19][19], float output[19][19], float kernel[96][3][3])
+void slip96(const float input[96][19][19], float output[19][19], float kernel[96][3][3])
 {
   // padding
   float input_padded[96][19+1+1][19+1+1] = {0};
@@ -286,8 +291,8 @@ void slip9696(const float input[96][19][19], float output[19][19], float kernel[
     for(int j=0; j<19; j++)
     {
       float fry[96][3][3];
-      fries9696(input_padded, fry, i, j);
-      output[i][j] = focus9696(fry, kernel);
+      fries96(input_padded, fry, i, j);
+      output[i][j] = focus96(fry, kernel);
     }
   }
 }
@@ -297,7 +302,25 @@ void conv9696(const float input[96][19][19], float output[96][19][19], float ker
   for (int I=0; I<96; I++)
   {
     float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip9696(input, output[I], cannon);
+    slip96(input, output[I], cannon);
+  }
+}
+
+void conv9664(const float input[96][19][19], float output[64][19][19], float kernel[64][96][3][3])
+{
+  for (int I=0; I<64; I++)
+  {
+    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
+    slip96(input, output[I], cannon);
+  }
+}
+
+void conv9632(const float input[96][19][19], float output[32][19][19], float kernel[32][96][3][3])
+{
+  for (int I=0; I<32; I++)
+  {
+    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
+    slip96(input, output[I], cannon);
   }
 }
 
@@ -396,7 +419,7 @@ void calcBias(const float input[96][19][19], float output[96][19][19], float bia
   }
 }
 
-void norm(const float input[22][19][19], float output[96][19][19], float scale[96], float bias[96])
+void norm(const float input[96][19][19], float output[96][19][19], float scale[96], float bias[96])
 {
     for (int i = 0; i < 96; i++) {
       for (int j = 0; j < 19; ++j) {
@@ -408,6 +431,31 @@ void norm(const float input[22][19][19], float output[96][19][19], float scale[9
           }
         }
     }
+}
+
+void norm32(const float input[32][19][19], float output[32][19][19], float scale[32], float bias[32])
+{
+    for (int i = 0; i < 32; i++) {
+      for (int j = 0; j < 19; ++j) {
+        for (int k = 0; k < 19; ++k) {
+          float x = input[i][j][k] * scale[i] + bias[i];
+          output[i][j][k] = (x > 0.0f) ? x : 0.0f;
+
+          // 小棋盘注意过滤掉不在棋盘上的点
+          }
+        }
+    }
+}
+
+void add(const float input[96][19][19], float output[96][19][19], float adder[96][19][19])
+{
+  for (int i = 0; i < 96; i++) {
+    for (int j = 0; j < 19; ++j) {
+      for (int k = 0; k < 19; ++k) {
+          output[i][j][k] = input[i][j][k] + adder[i][j][k];
+        }
+      }
+  }
 }
 
 int main() {
@@ -590,6 +638,7 @@ int main() {
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
 
     // block阶段
+    // 6个block分别是 ordi, ordi, gpool, ordi, gpool, ordi
     
     // BINS[2]全是0，也没用到，跳过
 
@@ -631,6 +680,191 @@ int main() {
 
 
     // BINS[6]全是0，也没用到，跳过
+    // BINS[7]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
+
+    float output5[96][19][19];
+    float scale1[96];
+    float bias1[96];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale1[i] = BINS[8].floats[n];
+      bias1[i] = BINS[9].floats[n];
+      n++;
+    }
+
+    norm(output4, output5, scale1, bias1);
+
+    printf("sumdiff: %f\n", err3((float*)output5, (const float*)after_second_norm_norm, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    float output6[96][19][19];
+    float kernel2[96][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel2[i][j][k][l] = BINS[10].floats[n++];
+          }
+
+    conv9696(output5, output6, kernel2);
+
+    float output7[96][19][19];
+
+    add(output2, output7, output6);
+
+    printf("sumdiff: %f\n", err3((float*)output7, (const float*)after2norms, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    /*第二个block开始，还是ordi*/
+
+    float output8[96][19][19];
+    float scale2[96];
+    float bias2[96];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale2[i] = BINS[12].floats[n];
+      bias2[i] = BINS[13].floats[n];
+      n++;
+    }
+
+    norm(output7, output8, scale2, bias2);
+
+    float output9[96][19][19];
+    float kernel3[96][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel3[i][j][k][l] = BINS[14].floats[n++];
+          }
+
+    conv9696(output8, output9, kernel3);
+
+    // BINS[16]全是0，也没用到，跳过
+    // BINS[17]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
+
+    float output10[96][19][19];
+    float scale3[96];
+    float bias3[96];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale3[i] = BINS[17].floats[n];
+      bias3[i] = BINS[18].floats[n];
+      n++;
+    }
+
+    norm(output9, output10, scale3, bias3);
+
+    float output11[96][19][19];
+    float kernel4[96][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel4[i][j][k][l] = BINS[19].floats[n++];
+          }
+
+    conv9696(output10, output11, kernel4);
+
+    float output12[96][19][19];
+
+    add(output7, output12, output11);
+
+    printf("sumdiff: %f\n", err3((float*)output12, (const float*)after2ordis, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    // 到了第三个block，gpool
+
+    // BINS[20]全是0，跳过
+
+    float output13[96][19][19];
+    float scale4[96];
+    float bias4[96];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale4[i] = BINS[21].floats[n];
+      bias4[i] = BINS[22].floats[n];
+      n++;
+    }
+
+    norm(output12, output13, scale4, bias4);
+
+    //从这开始分为了两支，先是regular支
+
+    float output14[64][19][19];
+    float kernel5[64][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <64; i++)
+          {
+            kernel5[i][j][k][l] = BINS[23].floats[n++];
+          }
+
+    conv9664(output13, output14, kernel5);
+
+    printf("sumdiff: %f\n", err3((float*)output14, (const float*)regularOut, 64, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    // g分支
+
+    float output15[32][19][19];
+    float kernel6[32][96][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <32; i++)
+          {
+            kernel6[i][j][k][l] = BINS[24].floats[n++];
+          }
+
+    conv9632(output13, output15, kernel6);
+
+    float output16[32][19][19];
+    float scale5[32];
+    float bias5[32];
+    n=0;
+
+    for(int i=0; i < 32; i++)
+    {
+      scale5[i] = BINS[26].floats[n];
+      bias5[i] = BINS[27].floats[n];
+      n++;
+    }
+
+    norm32(output15, output16, scale5, bias5);
+
+    printf("sumdiff: %f\n", err3((float*)output16, (const float*)gpoolOut2, 32, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+
 
 
 
