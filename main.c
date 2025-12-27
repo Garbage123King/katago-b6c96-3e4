@@ -122,6 +122,7 @@ extern const float after2norms[96][19][19];
 extern const float after2ordis[96][19][19];
 extern const float regularOut[64][19][19];
 extern const float gpoolOut2[32][19][19];
+extern const float afterglobal[96][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -297,6 +298,71 @@ void slip96(const float input[96][19][19], float output[19][19], float kernel[96
   }
 }
 
+float focus64(float input[64][3][3], float kernel[64][3][3])
+{
+  float s = 0.0f;
+  for(int i =0; i<64; i++)
+  {
+    for(int j=0; j<3; j++)
+    {
+      for(int k=0; k<3; k++)
+      {
+        if(input[i][j][k] > 1000000.0f || kernel[i][j][k] > 1000000.0f)
+        {
+          printf("warning! big number");
+        }
+        s += input[i][j][k] * kernel[i][j][k];
+      }
+    }
+  }
+  return s;
+}
+
+void fries64(float input_padded[64][21][21], float output[64][3][3], int x, int y)
+{
+  for(int i=0; i<64; i++)
+  {
+    for(int j=0; j<3; j++)
+    {
+      for(int k=0; k<3; k++)
+      {
+        output[i][j][k] = input_padded[i][x+j][y+k];
+        if(output[i][j][k] > 1000000.0f)
+        {
+          printf("warning! big number");
+        }
+      }
+    }
+  }
+
+}
+
+void slip64(const float input[64][19][19], float output[19][19], float kernel[64][3][3])
+{
+  // padding
+  float input_padded[64][19+1+1][19+1+1] = {0};
+  for(int i=0; i<64; i++)
+  {
+    for(int j=0; j<19; j++)
+    {
+      for(int k=0; k<19; k++)
+      {
+        input_padded[i][j+1][k+1] = input[i][j][k];
+      }
+    }
+  }
+  // conv
+  for(int i=0; i<19; i++)
+  {
+    for(int j=0; j<19; j++)
+    {
+      float fry[64][3][3];
+      fries64(input_padded, fry, i, j);
+      output[i][j] = focus64(fry, kernel);
+    }
+  }
+}
+
 void conv9696(const float input[96][19][19], float output[96][19][19], float kernel[96][96][3][3])
 {
   for (int I=0; I<96; I++)
@@ -321,6 +387,15 @@ void conv9632(const float input[96][19][19], float output[32][19][19], float ker
   {
     float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
     slip96(input, output[I], cannon);
+  }
+}
+
+void conv6496(const float input[64][19][19], float output[96][19][19], float kernel[96][64][3][3])
+{
+  for (int I=0; I<96; I++)
+  {
+    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
+    slip64(input, output[I], cannon);
   }
 }
 
@@ -447,6 +522,20 @@ void norm32(const float input[32][19][19], float output[32][19][19], float scale
     }
 }
 
+void norm64(const float input[64][19][19], float output[64][19][19], float scale[64], float bias[64])
+{
+    for (int i = 0; i < 64; i++) {
+      for (int j = 0; j < 19; ++j) {
+        for (int k = 0; k < 19; ++k) {
+          float x = input[i][j][k] * scale[i] + bias[i];
+          output[i][j][k] = (x > 0.0f) ? x : 0.0f;
+
+          // 小棋盘注意过滤掉不在棋盘上的点
+          }
+        }
+    }
+}
+
 void add(const float input[96][19][19], float output[96][19][19], float adder[96][19][19])
 {
   for (int i = 0; i < 96; i++) {
@@ -456,6 +545,55 @@ void add(const float input[96][19][19], float output[96][19][19], float adder[96
         }
       }
   }
+}
+
+void add_broadcast(const float input[64][19][19], float output[64][19][19], float adder[64])
+{
+  for (int i = 0; i < 64; i++) {
+    for (int j = 0; j < 19; ++j) {
+      for (int k = 0; k < 19; ++k) {
+        output[i][j][k] = input[i][j][k] + adder[i];
+        }
+      }
+  }
+}
+
+void rowsG(float input[32][19][19], float output[96])
+{
+  float div = 361.0f;
+  float sqrtdiv = 19.0f;
+  for(int I = 0; I<32; I++)
+  {
+    float s = 0.0f;
+    float max = -1.0f;
+    for(int i=0; i<19; i++)
+      for(int j=0; j<19; j++)
+      {
+        float x = input[I][i][j];
+        s += x;
+        /* remember change this*/
+        float maskVal = 1.0f;
+        float temp = x + (maskVal - 1.0f);
+        max = temp > max ? temp : max;
+      }
+        
+    float mean = s / div;
+    output[0 + I] = mean;
+    output[32 + I] = mean * (sqrtdiv - 14.0f) * 0.1f;
+    output[64 + I] = max;
+  }
+
+}
+
+void linear(const float input[96], float output[64], float nn[64][96])
+{
+    for (int I = 0; I < 64; I++) {
+      float s = 0.0f;
+      for (int i = 0; i < 96; i++) {
+          s += input[i] * nn[I][i];
+      }
+      output[I] = s;
+    }
 }
 
 int main() {
@@ -862,6 +1000,77 @@ int main() {
     printf("sumdiff: %f\n", err3((float*)output16, (const float*)gpoolOut2, 32, 19, 19, &maxdiff, &erri, &errj, &errk));
 
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    float output17[96];
+    rowsG(output16, output17);
+
+    /* 1.030514, 0.515257, 7.487195 */
+    printf("output17: %f, %f, %f\n", output17[0], output17[32], output17[64]);
+
+
+    float nn[64][96];
+    n=0;
+
+    for(int j=0; j < 96; j++)
+      for(int i=0; i < 64; i++)
+      {
+        nn[i][j] = BINS[28].floats[n];
+        n++;
+      }
+
+
+    float output18[64];
+    linear(output17, output18, nn);
+
+    /* -2.681623, 0.782912 */
+    printf("output18: %f, %f\n", output18[0], output18[55]);
+
+
+    float output19[64][19][19];
+    add_broadcast(output14, output19, output18);
+
+    
+    // 汇聚后再来一次normconv
+    // BINS[29]全是0，跳过
+    // BINS[30]跳过
+
+    float output20[64][19][19];
+    float scale6[64];
+    float bias6[64];
+    n=0;
+
+    for(int i=0; i < 64; i++)
+    {
+      scale6[i] = BINS[31].floats[n];
+      bias6[i] = BINS[32].floats[n];
+      n++;
+    }
+
+    norm64(output19, output20, scale6, bias6);
+
+    float output21[96][19][19];
+    float kernel7[96][64][3][3];
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <64; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel7[i][j][k][l] = BINS[33].floats[n++];
+          }
+
+    conv6496(output20, output21, kernel7);
+
+    float output22[96][19][19];
+
+    add(output12, output22, output21);
+
+    printf("sumdiff: %f\n", err3((float*)output22, (const float*)afterglobal, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
 
 
 
