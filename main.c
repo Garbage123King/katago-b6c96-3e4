@@ -117,8 +117,8 @@ extern const float inputMatMulOut[96];
 extern const float trunkScratch_afterBias[96][19][19];
 extern const float afternorm[96][19][19];
 extern const float afterconv[96][19][19];
-extern const float after_second_norm_norm[96][19][19];
-extern const float after2norms[96][19][19];
+extern const float afternorm2[96][19][19];
+extern const float afterconv2[96][19][19];
 extern const float after2ordis[96][19][19];
 extern const float regularOut[64][19][19];
 extern const float gpoolOut2[32][19][19];
@@ -596,6 +596,129 @@ void linear(const float input[96], float output[64], float nn[64][96])
     }
 }
 
+void ordi(float input[96][19][19], float output[96][19][19], float scale0[96], float bias0[96], const float (*afternorm)[19][19], float kernel1[96][96][3][3], const float (*afterconv)[19][19], float scale1[96], float bias1[96], const float (*afternorm2)[19][19], float kernel2[96][96][3][3], const float (*afterconv2)[19][19])
+{
+    float maxdiff;
+    int erri, errj, errk;
+
+    float output0[96][19][19];
+
+    norm(input, output0, scale0, bias0);
+
+    if(afternorm != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output0, (const float*)afternorm, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+    
+    float output1[96][19][19];
+
+    conv9696(output0, output1, kernel1);
+
+    if(afterconv != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output1, (const float*)afterconv, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+    
+    float output2[96][19][19];
+
+    norm(output1, output2, scale1, bias1);
+
+    if(afternorm2 != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output2, (const float*)afternorm2, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+    float output3[96][19][19];
+
+    conv9696(output2, output3, kernel2);
+
+    add(input, output, output3);
+
+    if(afterconv2 != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output, (const float*)afterconv2, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+
+}
+
+void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], float bias0[96], float kernel0[64][96][3][3], const float (*regularOut)[19][19], float kernel1[32][96][3][3], float scale1[32], float bias1[32], const float (*gpoolOut)[19][19], float nn[64][96], float scale2[64], float bias2[64], float kernel2[96][64][3][3], const float (*afterglobal)[19][19])
+{
+    float maxdiff;
+    int erri, errj, errk;
+
+    float output0[96][19][19];
+
+    norm(input, output0, scale0, bias0);
+
+    //从这开始分为了两支，先是regular支
+
+    float output1[64][19][19];
+
+    conv9664(output0, output1, kernel0);
+
+    if(regularOut != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output1, (const float*)regularOut, 64, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+
+    // g分支
+
+    float output2[32][19][19];
+
+    conv9632(output0, output2, kernel1);
+
+    float output3[32][19][19];
+
+    norm32(output2, output3, scale1, bias1);
+
+    if(gpoolOut != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output3, (const float*)gpoolOut, 32, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+    
+    float output4[96];
+    rowsG(output3, output4);
+
+    /* 1.030514, 0.515257, 7.487195 */
+    printf("output4: %f, %f, %f\n", output4[0], output4[32], output4[64]);
+
+    float output5[64];
+    linear(output4, output5, nn);
+
+    /* -2.681623, 0.782912 */
+    printf("output5: %f, %f\n", output5[0], output5[55]);
+
+
+    float output6[64][19][19];
+    add_broadcast(output1, output6, output5);
+
+    
+    // 汇聚后再来一次normconv
+    // BINS[29]全是0，跳过
+    // BINS[30]跳过
+
+    float output7[64][19][19];
+
+    norm64(output6, output7, scale2, bias2);
+
+    float output8[96][19][19];
+
+    conv6496(output7, output8, kernel2);
+
+    add(input, output, output8);
+
+    if(afterglobal != NULL)
+    {
+      printf("sumdiff: %f\n", err3((float*)output, (const float*)afterglobal, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+      printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    }
+}
+
 int main() {
     const char *gzfile = "model3e4.bin.gz";
     const char *binfile = "model3e4.bin";
@@ -780,8 +903,6 @@ int main() {
     
     // BINS[2]全是0，也没用到，跳过
 
-
-    float output3[96][19][19];
     float scale0[96];
     float bias0[96];
     n=0;
@@ -793,13 +914,6 @@ int main() {
       n++;
     }
 
-    norm(output2, output3, scale0, bias0);
-    printf("sumdiff: %f\n", err3((float*)output3, (const float*)afternorm, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
-
-    float output4[96][19][19];
     float kernel1[96][96][3][3];
     n=0;
 
@@ -811,16 +925,9 @@ int main() {
             kernel1[i][j][k][l] = BINS[5].floats[n++];
           }
 
-    conv9696(output3, output4, kernel1);
-    printf("sumdiff: %f\n", err3((float*)output4, (const float*)afterconv, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
-
     // BINS[6]全是0，也没用到，跳过
     // BINS[7]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
 
-    float output5[96][19][19];
     float scale1[96];
     float bias1[96];
     n=0;
@@ -832,13 +939,6 @@ int main() {
       n++;
     }
 
-    norm(output4, output5, scale1, bias1);
-
-    printf("sumdiff: %f\n", err3((float*)output5, (const float*)after_second_norm_norm, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
-    float output6[96][19][19];
     float kernel2[96][96][3][3];
     n=0;
 
@@ -850,19 +950,8 @@ int main() {
             kernel2[i][j][k][l] = BINS[10].floats[n++];
           }
 
-    conv9696(output5, output6, kernel2);
-
-    float output7[96][19][19];
-
-    add(output2, output7, output6);
-
-    printf("sumdiff: %f\n", err3((float*)output7, (const float*)after2norms, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
     /*第二个block开始，还是ordi*/
 
-    float output8[96][19][19];
     float scale2[96];
     float bias2[96];
     n=0;
@@ -874,9 +963,6 @@ int main() {
       n++;
     }
 
-    norm(output7, output8, scale2, bias2);
-
-    float output9[96][19][19];
     float kernel3[96][96][3][3];
     n=0;
 
@@ -888,12 +974,9 @@ int main() {
             kernel3[i][j][k][l] = BINS[14].floats[n++];
           }
 
-    conv9696(output8, output9, kernel3);
-
     // BINS[16]全是0，也没用到，跳过
     // BINS[17]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
 
-    float output10[96][19][19];
     float scale3[96];
     float bias3[96];
     n=0;
@@ -905,9 +988,6 @@ int main() {
       n++;
     }
 
-    norm(output9, output10, scale3, bias3);
-
-    float output11[96][19][19];
     float kernel4[96][96][3][3];
     n=0;
 
@@ -919,21 +999,10 @@ int main() {
             kernel4[i][j][k][l] = BINS[19].floats[n++];
           }
 
-    conv9696(output10, output11, kernel4);
-
-    float output12[96][19][19];
-
-    add(output7, output12, output11);
-
-    printf("sumdiff: %f\n", err3((float*)output12, (const float*)after2ordis, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
     // 到了第三个block，gpool
 
     // BINS[20]全是0，跳过
 
-    float output13[96][19][19];
     float scale4[96];
     float bias4[96];
     n=0;
@@ -945,11 +1014,6 @@ int main() {
       n++;
     }
 
-    norm(output12, output13, scale4, bias4);
-
-    //从这开始分为了两支，先是regular支
-
-    float output14[64][19][19];
     float kernel5[64][96][3][3];
     n=0;
 
@@ -961,15 +1025,6 @@ int main() {
             kernel5[i][j][k][l] = BINS[23].floats[n++];
           }
 
-    conv9664(output13, output14, kernel5);
-
-    printf("sumdiff: %f\n", err3((float*)output14, (const float*)regularOut, 64, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
-    // g分支
-
-    float output15[32][19][19];
     float kernel6[32][96][3][3];
     n=0;
 
@@ -981,9 +1036,6 @@ int main() {
             kernel6[i][j][k][l] = BINS[24].floats[n++];
           }
 
-    conv9632(output13, output15, kernel6);
-
-    float output16[32][19][19];
     float scale5[32];
     float bias5[32];
     n=0;
@@ -995,19 +1047,6 @@ int main() {
       n++;
     }
 
-    norm32(output15, output16, scale5, bias5);
-
-    printf("sumdiff: %f\n", err3((float*)output16, (const float*)gpoolOut2, 32, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
-
-    float output17[96];
-    rowsG(output16, output17);
-
-    /* 1.030514, 0.515257, 7.487195 */
-    printf("output17: %f, %f, %f\n", output17[0], output17[32], output17[64]);
-
-
     float nn[64][96];
     n=0;
 
@@ -1018,19 +1057,6 @@ int main() {
         n++;
       }
 
-
-    float output18[64];
-    linear(output17, output18, nn);
-
-    /* -2.681623, 0.782912 */
-    printf("output18: %f, %f\n", output18[0], output18[55]);
-
-
-    float output19[64][19][19];
-    add_broadcast(output14, output19, output18);
-
-    
-    // 汇聚后再来一次normconv
     // BINS[29]全是0，跳过
     // BINS[30]跳过
 
@@ -1046,9 +1072,6 @@ int main() {
       n++;
     }
 
-    norm64(output19, output20, scale6, bias6);
-
-    float output21[96][19][19];
     float kernel7[96][64][3][3];
     n=0;
 
@@ -1059,16 +1082,15 @@ int main() {
           {
             kernel7[i][j][k][l] = BINS[33].floats[n++];
           }
+    
+    float output3[96][19][19];
+    float output4[96][19][19];
+    float output5[96][19][19];
 
-    conv6496(output20, output21, kernel7);
+    ordi (output2, output3, scale0, bias0, afternorm, kernel1,    afterconv, scale1, bias1, afternorm2, kernel2, afterconv2);
+    ordi (output3, output4, scale2, bias2, NULL,      kernel3,    NULL,      scale3, bias3, NULL,       kernel4, after2ordis);
+    gpool(output4, output5, scale4, bias4, kernel5,   regularOut, kernel6,   scale5, bias5, gpoolOut2,  nn,      scale6, bias6, kernel7, afterglobal);
 
-    float output22[96][19][19];
-
-    add(output12, output22, output21);
-
-    printf("sumdiff: %f\n", err3((float*)output22, (const float*)afterglobal, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
-
-    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
 
 
 
