@@ -124,6 +124,7 @@ extern const float regularOut[64][19][19];
 extern const float gpoolOut2[32][19][19];
 extern const float afterglobal[96][19][19];
 extern const float afterblocks[96][19][19];
+extern const float policy[2][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -400,6 +401,40 @@ void conv6496(const float input[64][19][19], float output[96][19][19], float ker
   }
 }
 
+void conv1x1(const float input[96][19][19], float output[32][19][19], float kernel[32][96])
+{
+  for (int I=0; I<32; I++)
+  {
+    for(int i=0; i<19; i++)
+      for(int j=0; j<19; j++)
+      {
+        float s = 0.0f;
+        for (int k=0; k<96; k++)
+        {
+          s+=input[k][i][j]*kernel[I][k];
+        }
+        output[I][i][j] = s;
+      }
+  }
+}
+
+void conv322(const float input[32][19][19], float output[2][19][19], float kernel[2][32])
+{
+  for (int I=0; I<2; I++)
+  {
+    for(int i=0; i<19; i++)
+      for(int j=0; j<19; j++)
+      {
+        float s = 0.0f;
+        for (int k=0; k<32; k++)
+        {
+          s+=input[k][i][j]*kernel[I][k];
+        }
+        output[I][i][j] = s;
+      }
+  }
+}
+
 float err1(float *mat1, const float *mat2, int x, float *maxdiff, int *oi)
 {
   float s = 0.0f;
@@ -559,6 +594,17 @@ void add_broadcast(const float input[64][19][19], float output[64][19][19], floa
   }
 }
 
+void add_broadcast32(const float input[32][19][19], float output[32][19][19], float adder[32])
+{
+  for (int i = 0; i < 32; i++) {
+    for (int j = 0; j < 19; ++j) {
+      for (int k = 0; k < 19; ++k) {
+        output[i][j][k] = input[i][j][k] + adder[i];
+        }
+      }
+  }
+}
+
 void rowsG(float input[32][19][19], float output[96])
 {
   float div = 361.0f;
@@ -589,6 +635,17 @@ void rowsG(float input[32][19][19], float output[96])
 void linear(const float input[96], float output[64], float nn[64][96])
 {
     for (int I = 0; I < 64; I++) {
+      float s = 0.0f;
+      for (int i = 0; i < 96; i++) {
+          s += input[i] * nn[I][i];
+      }
+      output[I] = s;
+    }
+}
+
+void linear9632(const float input[96], float output[32], float nn[32][96])
+{
+    for (int I = 0; I < 32; I++) {
       float s = 0.0f;
       for (int i = 0; i < 96; i++) {
           s += input[i] * nn[I][i];
@@ -1056,6 +1113,127 @@ int main() {
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
 
     /* 6个block全部结束*/
+
+
+    float scale14[96];
+    float bias14[96];
+    float output9[96][19][19];
+    n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale14[i] = BINS[67].floats[n];
+      bias14[i] = BINS[68].floats[n];
+      n++;
+    }
+
+    norm(output8, output9, scale14, bias14);
+
+    /* policy头 */
+
+    /*分支1备用*/
+    float kernel15[32][96];
+
+    n=0;
+
+    for(int j=0; j <96; j++)
+      for(int i=0; i <32; i++)
+      {
+        kernel15[i][j] = BINS[69].floats[n++];
+      }
+
+    float output10[32][19][19];
+    conv1x1(output9, output10, kernel15);
+
+    /*分支2*/
+
+    float kernel16[32][96];
+
+    n=0;
+
+    for(int j=0; j <96; j++)
+      for(int i=0; i <32; i++)
+      {
+        kernel16[i][j] = BINS[70].floats[n++];
+      }
+
+    float output11[32][19][19];
+    conv1x1(output9, output11, kernel16);
+
+    float scale15[32];
+    float bias15[32];
+    float output12[32][19][19];
+    n=0;
+
+    for(int i=0; i < 32; i++)
+    {
+      scale15[i] = BINS[72].floats[n];
+      bias15[i] = BINS[73].floats[n];
+      n++;
+    }
+
+    norm32(output11, output12, scale15, bias15);
+
+    float output13[96];
+    rowsG(output12, output13);
+
+    float nn2[32][96];
+    n=0;
+
+    for(int j=0; j < 96; j++)
+      for(int i=0; i < 32; i++)
+      {
+        nn2[i][j] = BINS[74].floats[n];
+        n++;
+      }
+
+    float output14[32];
+    linear9632(output13, output14, nn2);
+
+    float output15[32][19][19];
+    add_broadcast32(output10, output15, output14);
+
+    /* output15[0][0][0]: 0.358652, output15[0][0][1]: -0.280337, output15[0][0][2]: 0.398067 */
+    printf("output15[0][0][0]: %f, output15[0][0][1]: %f, output15[0][0][2]: %f\n", output15[0][0][0], output15[0][0][1], output15[0][0][2]);
+
+    // 汇聚后再来一次normconv
+
+    float scale16[32];
+    float bias16[32];
+    n=0;
+
+    for(int i=0; i < 32; i++)
+    {
+      scale16[i] = BINS[76].floats[n];
+      bias16[i] = BINS[77].floats[n];
+      n++;
+    }
+    float output16[32][19][19];
+
+    norm32(output15, output16, scale16, bias16);
+
+    float kernel17[2][32];
+
+    n=0;
+
+    for(int j=0; j <32; j++)
+      for(int i=0; i <2; i++)
+      {
+        kernel17[i][j] = BINS[78].floats[n++];
+      }
+    
+    float output17[2][19][19];
+
+    conv322(output16, output17, kernel17);
+
+    /* 4.33436871 */
+    printf("output17[0][1][14]: %f\n", output17[0][1][14]);
+
+    printf("sumdiff: %f\n", err3((float*)output17, (const float*)policy, 2, 19, 19, &maxdiff, &erri, &errj, &errk));
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+
+    
 
 
 
