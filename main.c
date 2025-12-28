@@ -123,6 +123,7 @@ extern const float after2ordis[96][19][19];
 extern const float regularOut[64][19][19];
 extern const float gpoolOut2[32][19][19];
 extern const float afterglobal[96][19][19];
+extern const float afterblocks[96][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -719,6 +720,117 @@ void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], 
     }
 }
 
+void load_ordi(float scale0[96], float bias0[96], float kernel1[96][96][3][3], float scale1[96], float bias1[96], float kernel2[96][96][3][3], int i0, int i1, int i2, int i3, int i4, int i5)
+{
+  int n=0;
+
+  for(int i=0; i < 96; i++)
+  {
+    scale0[i] = BINS[i0].floats[n];
+    bias0[i] = BINS[i1].floats[n];
+    n++;
+  }
+
+  n=0;
+
+  for(int k=0; k <3; k++)
+    for(int l=0; l <3; l++)
+      for(int j=0; j <96; j++)
+        for(int i=0; i <96; i++)
+        {
+          kernel1[i][j][k][l] = BINS[i2].floats[n++];
+        }
+  
+  n=0;
+
+  for(int i=0; i < 96; i++)
+  {
+    scale1[i] = BINS[i3].floats[n];
+    bias1[i] = BINS[i4].floats[n];
+    n++;
+  }
+
+  n=0;
+
+  for(int k=0; k <3; k++)
+    for(int l=0; l <3; l++)
+      for(int j=0; j <96; j++)
+        for(int i=0; i <96; i++)
+        {
+          kernel2[i][j][k][l] = BINS[i5].floats[n++];
+        }
+}
+
+void load_gpool(float scale0[96], float bias0[96], float kernel0[64][96][3][3], float kernel1[32][96][3][3], float scale1[32], float bias1[32], float nn[64][96], float scale2[64], float bias2[64], float kernel2[96][64][3][3], int i0, int i1, int i2, int i3, int i4, int i5, int i6, int i7, int i8, int i9)
+{
+    int n=0;
+
+    for(int i=0; i < 96; i++)
+    {
+      scale0[i] = BINS[i0].floats[n];
+      bias0[i] = BINS[i1].floats[n];
+      n++;
+    }
+
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <64; i++)
+          {
+            kernel0[i][j][k][l] = BINS[i2].floats[n++];
+          }
+
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <96; j++)
+          for(int i=0; i <32; i++)
+          {
+            kernel1[i][j][k][l] = BINS[i3].floats[n++];
+          }
+
+    n=0;
+
+    for(int i=0; i < 32; i++)
+    {
+      scale1[i] = BINS[i4].floats[n];
+      bias1[i] = BINS[i5].floats[n];
+      n++;
+    }
+
+    n=0;
+
+    for(int j=0; j < 96; j++)
+      for(int i=0; i < 64; i++)
+      {
+        nn[i][j] = BINS[i6].floats[n];
+        n++;
+      }
+
+    n=0;
+
+    for(int i=0; i < 64; i++)
+    {
+      scale2[i] = BINS[i7].floats[n];
+      bias2[i] = BINS[i8].floats[n];
+      n++;
+    }
+
+    n=0;
+
+    for(int k=0; k <3; k++)
+      for(int l=0; l <3; l++)
+        for(int j=0; j <64; j++)
+          for(int i=0; i <96; i++)
+          {
+            kernel2[i][j][k][l] = BINS[i9].floats[n++];
+          }
+}
+
+
 int main() {
     const char *gzfile = "model3e4.bin.gz";
     const char *binfile = "model3e4.bin";
@@ -900,196 +1012,51 @@ int main() {
 
     // block阶段
     // 6个block分别是 ordi, ordi, gpool, ordi, gpool, ordi
-    
-    // BINS[2]全是0，也没用到，跳过
 
-    float scale0[96];
-    float bias0[96];
-    n=0;
+    float scale0[96],            scale2[96],            scale7[96],            scale12[96];
+    float bias0[96],             bias2[96],             bias7[96],             bias12[96];
+    float kernel1[96][96][3][3], kernel3[96][96][3][3], kernel8[96][96][3][3],  kernel13[96][96][3][3];
+    float scale1[96],            scale3[96],            scale8[96],            scale13[96];
+    float bias1[96],             bias3[96],             bias8[96],             bias13[96];
+    float kernel2[96][96][3][3], kernel4[96][96][3][3], kernel9[96][96][3][3], kernel14[96][96][3][3];
 
-    for(int i=0; i < 96; i++)
-    {
-      scale0[i] = BINS[3].floats[n];
-      bias0[i] = BINS[4].floats[n];
-      n++;
-    }
+    float scale4[96],            scale9[96];
+    float bias4[96],             bias9[96];
+    float kernel5[64][96][3][3], kernel10[64][96][3][3];
+    float kernel6[32][96][3][3], kernel11[32][96][3][3];
+    float scale5[32],            scale10[32];
+    float bias5[32],             bias10[32];
+    float nn0[64][96],           nn1[64][96];
+    float scale6[64],            scale11[64];
+    float bias6[64],             bias11[64];
+    float kernel7[96][64][3][3], kernel12[96][64][3][3];
 
-    float kernel1[96][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <96; i++)
-          {
-            kernel1[i][j][k][l] = BINS[5].floats[n++];
-          }
-
-    // BINS[6]全是0，也没用到，跳过
-    // BINS[7]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
-
-    float scale1[96];
-    float bias1[96];
-    n=0;
-
-    for(int i=0; i < 96; i++)
-    {
-      scale1[i] = BINS[8].floats[n];
-      bias1[i] = BINS[9].floats[n];
-      n++;
-    }
-
-    float kernel2[96][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <96; i++)
-          {
-            kernel2[i][j][k][l] = BINS[10].floats[n++];
-          }
-
-    /*第二个block开始，还是ordi*/
-
-    float scale2[96];
-    float bias2[96];
-    n=0;
-
-    for(int i=0; i < 96; i++)
-    {
-      scale2[i] = BINS[12].floats[n];
-      bias2[i] = BINS[13].floats[n];
-      n++;
-    }
-
-    float kernel3[96][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <96; i++)
-          {
-            kernel3[i][j][k][l] = BINS[14].floats[n++];
-          }
-
-    // BINS[16]全是0，也没用到，跳过
-    // BINS[17]全是1，但此时scale不像上次一样，没用这个。而是跳过了这个，用了下一个。
-
-    float scale3[96];
-    float bias3[96];
-    n=0;
-
-    for(int i=0; i < 96; i++)
-    {
-      scale3[i] = BINS[17].floats[n];
-      bias3[i] = BINS[18].floats[n];
-      n++;
-    }
-
-    float kernel4[96][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <96; i++)
-          {
-            kernel4[i][j][k][l] = BINS[19].floats[n++];
-          }
-
-    // 到了第三个block，gpool
-
-    // BINS[20]全是0，跳过
-
-    float scale4[96];
-    float bias4[96];
-    n=0;
-
-    for(int i=0; i < 96; i++)
-    {
-      scale4[i] = BINS[21].floats[n];
-      bias4[i] = BINS[22].floats[n];
-      n++;
-    }
-
-    float kernel5[64][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <64; i++)
-          {
-            kernel5[i][j][k][l] = BINS[23].floats[n++];
-          }
-
-    float kernel6[32][96][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <96; j++)
-          for(int i=0; i <32; i++)
-          {
-            kernel6[i][j][k][l] = BINS[24].floats[n++];
-          }
-
-    float scale5[32];
-    float bias5[32];
-    n=0;
-
-    for(int i=0; i < 32; i++)
-    {
-      scale5[i] = BINS[26].floats[n];
-      bias5[i] = BINS[27].floats[n];
-      n++;
-    }
-
-    float nn[64][96];
-    n=0;
-
-    for(int j=0; j < 96; j++)
-      for(int i=0; i < 64; i++)
-      {
-        nn[i][j] = BINS[28].floats[n];
-        n++;
-      }
-
-    // BINS[29]全是0，跳过
-    // BINS[30]跳过
-
-    float output20[64][19][19];
-    float scale6[64];
-    float bias6[64];
-    n=0;
-
-    for(int i=0; i < 64; i++)
-    {
-      scale6[i] = BINS[31].floats[n];
-      bias6[i] = BINS[32].floats[n];
-      n++;
-    }
-
-    float kernel7[96][64][3][3];
-    n=0;
-
-    for(int k=0; k <3; k++)
-      for(int l=0; l <3; l++)
-        for(int j=0; j <64; j++)
-          for(int i=0; i <96; i++)
-          {
-            kernel7[i][j][k][l] = BINS[33].floats[n++];
-          }
-    
     float output3[96][19][19];
     float output4[96][19][19];
     float output5[96][19][19];
+    float output6[96][19][19];
+    float output7[96][19][19];
+    float output8[96][19][19];
 
-    ordi (output2, output3, scale0, bias0, afternorm, kernel1,    afterconv, scale1, bias1, afternorm2, kernel2, afterconv2);
-    ordi (output3, output4, scale2, bias2, NULL,      kernel3,    NULL,      scale3, bias3, NULL,       kernel4, after2ordis);
-    gpool(output4, output5, scale4, bias4, kernel5,   regularOut, kernel6,   scale5, bias5, gpoolOut2,  nn,      scale6, bias6, kernel7, afterglobal);
+    load_ordi(scale0, bias0, kernel1, scale1, bias1, kernel2, 3, 4, 5, 8, 9, 10);
+    load_ordi(scale2, bias2, kernel3, scale3, bias3, kernel4, 12, 13, 14, 17, 18, 19);
+    load_gpool(scale4, bias4, kernel5, kernel6, scale5, bias5, nn0, scale6, bias6, kernel7, 21, 22, 23, 24, 26, 27, 28, 31, 32, 33);
+    load_ordi(scale7, bias7, kernel8, scale8, bias8, kernel9, 35, 36, 37, 40, 41, 42);
+    load_gpool(scale9, bias9, kernel10, kernel11, scale10, bias10, nn1, scale11, bias11, kernel12, 44, 45, 46, 47, 49, 50, 51, 54, 55, 56);
+    load_ordi(scale12, bias12, kernel13, scale13, bias13, kernel14, 58, 59, 60, 63, 64, 65);
+
+    ordi (output2, output3, scale0,  bias0,  afternorm, kernel1,    afterconv, scale1,  bias1,  afternorm2, kernel2,  afterconv2);
+    ordi (output3, output4, scale2,  bias2,  NULL,      kernel3,    NULL,      scale3,  bias3,  NULL,       kernel4,  after2ordis);
+    gpool(output4, output5, scale4,  bias4,  kernel5,   regularOut, kernel6,   scale5,  bias5,  gpoolOut2,  nn0,      scale6,  bias6,  kernel7,  afterglobal);
+    ordi (output5, output6, scale7,  bias7,  NULL,      kernel8,    NULL,      scale8,  bias8,  NULL,       kernel9,  NULL);
+    gpool(output6, output7, scale9,  bias9,  kernel10,  NULL,       kernel11,  scale10, bias10, NULL,       nn1,      scale11, bias11, kernel12, NULL);
+    ordi (output7, output8, scale12, bias12, NULL,      kernel13,   NULL,      scale13, bias13, NULL,       kernel14, NULL);
+
+    printf("sumdiff: %f\n", err3((float*)output8, (const float*)afterblocks, 96, 19, 19, &maxdiff, &erri, &errj, &errk));
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    /* 6个block全部结束*/
+
 
 
 
