@@ -125,6 +125,8 @@ extern const float gpoolOut2[32][19][19];
 extern const float afterglobal[96][19][19];
 extern const float afterblocks[96][19][19];
 extern const float policy[2][19][19];
+extern const float ending[64];
+extern const float ownership[2][19][19];
 
 long get_file_size(FILE *fp) {
     long cur = ftell(fp);          // 记录当前位置
@@ -629,10 +631,33 @@ void rowsG(float input[32][19][19], float output[96])
     output[32 + I] = mean * (sqrtdiv - 14.0f) * 0.1f;
     output[64 + I] = max;
   }
+}
+
+void poolRowsValueHead(float input[32][19][19], float output[96])
+{
+  float div = 361.0f;
+  float sqrtdiv = 19.0f;
+  for(int I = 0; I<32; I++)
+  {
+    float s = 0.0f;
+    for(int i=0; i<19; i++)
+      for(int j=0; j<19; j++)
+      {
+        float x = input[I][i][j];
+        s += x;
+        /* remember change this*/
+        float maskVal = 1.0f;
+      }
+        
+    float mean = s / div;
+    output[0 + I] = mean;
+    output[32 + I] = mean * (sqrtdiv - 14.0f) * 0.1f;
+    output[64 + I] = mean * ((sqrtdiv - 14.0f) * (sqrtdiv - 14.0f) * 0.01f - 0.1f);
+  }
 
 }
 
-void linear(const float input[96], float output[64], float nn[64][96])
+void linear9664(const float input[96], float output[64], float nn[64][96])
 {
     for (int I = 0; I < 64; I++) {
       float s = 0.0f;
@@ -648,6 +673,28 @@ void linear9632(const float input[96], float output[32], float nn[32][96])
     for (int I = 0; I < 32; I++) {
       float s = 0.0f;
       for (int i = 0; i < 96; i++) {
+          s += input[i] * nn[I][i];
+      }
+      output[I] = s;
+    }
+}
+
+void linear643(const float input[64], float output[3], float nn[3][64])
+{
+    for (int I = 0; I < 3; I++) {
+      float s = 0.0f;
+      for (int i = 0; i < 64; i++) {
+          s += input[i] * nn[I][i];
+      }
+      output[I] = s;
+    }
+}
+
+void linear646(const float input[64], float output[6], float nn[6][64])
+{
+    for (int I = 0; I < 6; I++) {
+      float s = 0.0f;
+      for (int i = 0; i < 64; i++) {
           s += input[i] * nn[I][i];
       }
       output[I] = s;
@@ -746,7 +793,7 @@ void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], 
     printf("output4: %f, %f, %f\n", output4[0], output4[32], output4[64]);
 
     float output5[64];
-    linear(output4, output5, nn);
+    linear9664(output4, output5, nn);
 
     /* -2.681623, 0.782912 */
     printf("output5: %f, %f\n", output5[0], output5[55]);
@@ -1113,6 +1160,7 @@ int main() {
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
 
     /* 6个block全部结束*/
+    // 来一次final norm
 
 
     float scale14[96];
@@ -1128,6 +1176,8 @@ int main() {
     }
 
     norm(output8, output9, scale14, bias14);
+
+    /* 以下开始各种头，policy, pass, value, scorevalue, ownership一共5个头 */
 
     /* policy头 */
 
@@ -1176,6 +1226,8 @@ int main() {
 
     float output13[96];
     rowsG(output12, output13);
+
+    // 从这起开始分两个头，policy和pass
 
     float nn2[32][96];
     n=0;
@@ -1231,6 +1283,229 @@ int main() {
 
     printf("sumdiff: %f\n", err3((float*)output17, (const float*)policy, 2, 19, 19, &maxdiff, &erri, &errj, &errk));
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    float nn3[32][96];
+    n=0;
+
+    for(int j=0; j < 96; j++)
+      for(int i=0; i < 32; i++)
+      {
+        nn3[i][j] = BINS[79].floats[n];
+        n++;
+      }
+
+    float output18[32];
+    linear9632(output13, output18, nn3);
+
+    float adder0[32];
+    n=0;
+    for(int i=0; i < 32; i++)
+    {
+      adder0[i] = BINS[80].floats[n];
+      n++;
+    }
+    float output19[32];
+    // 加Bias
+    for(int i=0; i < 32; i++)
+    {
+      output19[i] = output18[i] + adder0[i];
+    }
+    // 纯relu
+    for(int i=0; i < 32; i++)
+    {
+      output19[i] = output19[i] > 0 ? output19[i] : 0.0f;
+    }
+    //norm
+    float mult[2][32];
+    n=0;
+
+    for(int j=0; j < 32; j++)
+      for(int i=0; i < 2; i++)
+      {
+        mult[i][j] = BINS[81].floats[n];
+        n++;
+      }
+    float output20[2];
+    for(int I=0; I < 2; I++)
+    {
+      float s = 0.0f;
+      for(int i=0; i < 32; i++)
+      {
+        s += mult[I][i] * output19[i];
+      }
+      output20[I] = s;
+    }
+
+    /* -5.42180157 -2.82181287 */
+    printf("output20[0]: %f, output20[1]: %f\n", output20[0], output20[1]);
+
+    /* Value 头*/
+    //先Conv
+    float kernel18[32][96];
+
+    n=0;
+
+    for(int j=0; j <96; j++)
+      for(int i=0; i <32; i++)
+      {
+        kernel18[i][j] = BINS[82].floats[n++];
+      }
+
+    float output21[32][19][19];
+    conv1x1(output9, output21, kernel18);
+
+    //norm
+    float scale17[32];
+    float bias17[32];
+    float output22[32][19][19];
+    n=0;
+
+    for(int i=0; i < 32; i++)
+    {
+      scale17[i] = BINS[84].floats[n];
+      bias17[i] = BINS[85].floats[n];
+      n++;
+    }
+
+    norm32(output21, output22, scale17, bias17);
+
+
+    //ownership在此分出
+
+    float output23[96];
+    poolRowsValueHead(output22, output23);
+
+    //mult
+    float nn4[64][96];
+    n=0;
+
+    for(int j=0; j < 96; j++)
+      for(int i=0; i < 64; i++)
+      {
+        nn4[i][j] = BINS[86].floats[n];
+        n++;
+      }
+
+    float output24[64];
+    linear9664(output23, output24, nn4);
+
+    float adder1[64];
+    n=0;
+    for(int i=0; i < 64; i++)
+    {
+      adder1[i] = BINS[87].floats[n];
+      n++;
+    }
+    float output25[64];
+    // 加Bias
+    for(int i=0; i < 64; i++)
+    {
+      output25[i] = output24[i] + adder1[i];
+    }
+    // 纯relu
+    for(int i=0; i < 64; i++)
+    {
+      output25[i] = output25[i] > 0 ? output25[i] : 0.0f;
+    }
+    printf("sumdiff: %f\n", err1((float*)output25, (const float*)ending, 64, &maxdiff, &erri));
+    printf("maxdiff: %f, %d\n", maxdiff, erri);
+
+    //分出分支value和scorevalue
+
+    /* value分支 */
+    // mult
+    float nn5[3][64];
+    n=0;
+
+    for(int j=0; j < 64; j++)
+      for(int i=0; i < 3; i++)
+      {
+        nn5[i][j] = BINS[88].floats[n];
+        n++;
+      }
+
+    float output26[3];
+    linear643(output25, output26, nn5);
+
+    float adder2[3];
+    n=0;
+    for(int i=0; i < 3; i++)
+    {
+      adder2[i] = BINS[89].floats[n];
+      n++;
+    }
+    float output27[3];
+    // 加Bias
+    for(int i=0; i < 3; i++)
+    {
+      output27[i] = output26[i] + adder2[i];
+    }
+
+    /* 3.91983986, 0.257796347, -8.04482841 */
+
+    printf("Value: %f, %f, %f\n", output27[0], output27[1], output27[2]);
+
+    /* scorevalue分支 */
+    float nn6[6][64];
+    n=0;
+
+    for(int j=0; j < 64; j++)
+      for(int i=0; i < 6; i++)
+      {
+        nn6[i][j] = BINS[90].floats[n];
+        n++;
+      }
+
+    float output28[6];
+    linear646(output25, output28, nn6);
+
+    float adder3[6];
+    n=0;
+    for(int i=0; i < 6; i++)
+    {
+      adder3[i] = BINS[91].floats[n];
+      n++;
+    }
+    float output29[6];
+    // 加Bias
+    for(int i=0; i < 6; i++)
+    {
+      output29[i] = output28[i] + adder3[i];
+    }
+
+    //conv
+    /* 1.04362237, 0.277711838, 1.10721207, -2.94248509, -3.38309383, -1.99079299 */
+    printf("scoreValue: %f, %f, %f, %f, %f, %f\n", output29[0], output29[1], output29[2], output29[3], output29[4], output29[5]);
+
+
+    // ownership
+    float kernel19[32];
+
+    n=0;
+
+    for(int i=0; i <32; i++)
+    {
+      kernel19[i] = BINS[92].floats[n++];
+    }
+
+    float output30[19][19];
+
+    for(int i=0; i <19; i++)
+      for(int j=0; j <19; j++)
+      {
+        float s =0.0f;
+        for(int k=0; k<32; k++)
+        {
+          s += kernel19[k] * output22[k][i][j];
+        }
+        output30[i][j] = s;
+      }
+
+    printf("sumdiff: %f\n", err3((float*)output30, (const float*)ownership, 1, 19, 19, &maxdiff, &erri, &errj, &errk));
+    printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+
+    
+
 
 
     
