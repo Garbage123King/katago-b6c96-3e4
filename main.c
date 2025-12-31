@@ -163,10 +163,10 @@ int float_cmp(const void* a, const void* b) {
     else return 0;
 }
 
-float focus22(float input[22][3][3], float kernel[22][3][3])
+float focus(float (*input)[3][3], int input_channel, float (*kernel)[3][3])
 {
   float s = 0.0f;
-  for(int i =0; i<22; i++)
+  for(int i =0; i<input_channel; i++)
   {
     for(int j=0; j<3; j++)
     {
@@ -183,9 +183,9 @@ float focus22(float input[22][3][3], float kernel[22][3][3])
   return s;
 }
 
-void fries22(float input_padded[22][21][21], float output[22][3][3], int x, int y)
+void fries(float (*input_padded)[21][21], int input_channel, float (*output)[3][3], int x, int y)
 {
-  for(int i=0; i<22; i++)
+  for(int i=0; i<input_channel; i++)
   {
     for(int j=0; j<3; j++)
     {
@@ -202,17 +202,22 @@ void fries22(float input_padded[22][21][21], float output[22][3][3], int x, int 
 
 }
 
-void slip22(const float input[22][19][19], float output[19][19], float kernel[22][3][3])
+void slip3x3(const float (*input)[19][19], int input_channel, float output_a_plane[19][19], float (*kernel)[3][3])
 {
   // padding
-  float input_padded[22][19+1+1][19+1+1] = {0};
-  for(int i=0; i<22; i++)
+  float (*input_padded)[19+1+1][19+1+1] = NULL;
+  input_padded  = malloc(sizeof(float[19+1+1][19+1+1]) * input_channel);
+  if (input_padded == NULL) { printf("malloc failed\n"); exit(1);}
+  for(int i=0; i<input_channel; i++)
   {
-    for(int j=0; j<19; j++)
+    for(int j=0; j<19+1+1; j++)
     {
-      for(int k=0; k<19; k++)
+      for(int k=0; k<19+1+1; k++)
       {
-        input_padded[i][j+1][k+1] = input[i][j][k];
+        if(j==0 || k ==0 || j== 19+1 || k == 19+1)
+          input_padded[i][j][k] = 0;
+        else
+          input_padded[i][j][k] = input[i][j-1][k-1];
       }
     }
   }
@@ -221,19 +226,24 @@ void slip22(const float input[22][19][19], float output[19][19], float kernel[22
   {
     for(int j=0; j<19; j++)
     {
-      float fry[22][3][3];
-      fries22(input_padded, fry, i, j);
-      output[i][j] = focus22(fry, kernel);
+      float (*fry)[3][3];
+      fry = malloc(sizeof(float[3][3]) * input_channel);
+      if (fry == NULL) { printf("malloc failed\n"); exit(1);}
+      fries(input_padded, input_channel, fry, i, j);
+      output_a_plane[i][j] = focus(fry, input_channel, kernel);
+      free(fry);
     }
   }
+  free(input_padded);
 }
 
-void conv2296(const float input[22][19][19], float output[96][19][19], float kernel[96][22][3][3])
+// for example: input[22][19][19], output[96][19][19], kernel[96][22][3][3]
+void conv3x3(const float (*input)[19][19], int input_channel, float (*output)[19][19], int output_channel, float (*kernel)[3][3])
 {
-  for (int I=0; I<96; I++)
+  for (int I=0; I < output_channel; I++)
   {
-    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip22(input, output[I], cannon);
+    float (*cannon)[3][3] = kernel + I * input_channel; /*for example: cannon[22][3][3]*/
+    slip3x3(input, input_channel, output[I], cannon);
   }
 }
 
@@ -367,70 +377,17 @@ void slip64(const float input[64][19][19], float output[19][19], float kernel[64
   }
 }
 
-void conv9696(const float input[96][19][19], float output[96][19][19], float kernel[96][96][3][3])
+void conv1x1(const float (*input)[19][19], int input_channel, float (*output)[19][19], int output_channel, float *kernel)
 {
-  for (int I=0; I<96; I++)
-  {
-    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip96(input, output[I], cannon);
-  }
-}
-
-void conv9664(const float input[96][19][19], float output[64][19][19], float kernel[64][96][3][3])
-{
-  for (int I=0; I<64; I++)
-  {
-    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip96(input, output[I], cannon);
-  }
-}
-
-void conv9632(const float input[96][19][19], float output[32][19][19], float kernel[32][96][3][3])
-{
-  for (int I=0; I<32; I++)
-  {
-    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip96(input, output[I], cannon);
-  }
-}
-
-void conv6496(const float input[64][19][19], float output[96][19][19], float kernel[96][64][3][3])
-{
-  for (int I=0; I<96; I++)
-  {
-    float (*cannon)[3][3] = kernel[I]; /*cannon[22][3][3]*/
-    slip64(input, output[I], cannon);
-  }
-}
-
-void conv1x1(const float input[96][19][19], float output[32][19][19], float kernel[32][96])
-{
-  for (int I=0; I<32; I++)
+  for (int I=0; I < output_channel; I++)
   {
     for(int i=0; i<19; i++)
       for(int j=0; j<19; j++)
       {
         float s = 0.0f;
-        for (int k=0; k<96; k++)
+        for (int k=0; k < input_channel; k++)
         {
-          s+=input[k][i][j]*kernel[I][k];
-        }
-        output[I][i][j] = s;
-      }
-  }
-}
-
-void conv322(const float input[32][19][19], float output[2][19][19], float kernel[2][32])
-{
-  for (int I=0; I<2; I++)
-  {
-    for(int i=0; i<19; i++)
-      for(int j=0; j<19; j++)
-      {
-        float s = 0.0f;
-        for (int k=0; k<32; k++)
-        {
-          s+=input[k][i][j]*kernel[I][k];
+          s+=input[k][i][j]*kernel[I*input_channel + k];
         }
         output[I][i][j] = s;
       }
@@ -718,7 +675,7 @@ void ordi(float input[96][19][19], float output[96][19][19], float scale0[96], f
     
     float output1[96][19][19];
 
-    conv9696(output0, output1, kernel1);
+    conv3x3(output0, 96, output1, 96, (float (*)[3][3])kernel1);
 
     if(afterconv != NULL)
     {
@@ -737,7 +694,7 @@ void ordi(float input[96][19][19], float output[96][19][19], float scale0[96], f
     }
     float output3[96][19][19];
 
-    conv9696(output2, output3, kernel2);
+    conv3x3(output2, 96, output3, 96, (float (*)[3][3])kernel2);
 
     add(input, output, output3);
 
@@ -762,7 +719,7 @@ void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], 
 
     float output1[64][19][19];
 
-    conv9664(output0, output1, kernel0);
+    conv3x3(output0, 96, output1, 64, (float (*)[3][3])kernel0);
 
     if(regularOut != NULL)
     {
@@ -774,7 +731,7 @@ void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], 
 
     float output2[32][19][19];
 
-    conv9632(output0, output2, kernel1);
+    conv3x3(output0, 96, output2, 32, (float (*)[3][3])kernel1);
 
     float output3[32][19][19];
 
@@ -813,7 +770,7 @@ void gpool(float input[96][19][19], float output[96][19][19], float scale0[96], 
 
     float output8[96][19][19];
 
-    conv6496(output7, output8, kernel2);
+    conv3x3(output7, 64, output8, 96, (float (*)[3][3])kernel2);
 
     add(input, output, output8);
 
@@ -1078,7 +1035,7 @@ int main() {
           {
             kernel0[i][j][k][l] = BINS[0].floats[n++];
           }
-    conv2296(input, output0, kernel0);
+    conv3x3(input, 22, output0, 96, (float (*)[3][3])kernel0);
 
     float maxdiff;
     int erri, errj, errk;
@@ -1193,7 +1150,7 @@ int main() {
       }
 
     float output10[32][19][19];
-    conv1x1(output9, output10, kernel15);
+    conv1x1(output9, 96, output10, 32, (float*)kernel15);
 
     /*分支2*/
 
@@ -1208,7 +1165,7 @@ int main() {
       }
 
     float output11[32][19][19];
-    conv1x1(output9, output11, kernel16);
+    conv1x1(output9, 96, output11, 32, (float*)kernel16);
 
     float scale15[32];
     float bias15[32];
@@ -1276,7 +1233,7 @@ int main() {
     
     float output17[2][19][19];
 
-    conv322(output16, output17, kernel17);
+    conv1x1(output16, 32, output17, 2, (float*)kernel17);
 
     /* 4.33436871 */
     printf("output17[0][1][14]: %f\n", output17[0][1][14]);
@@ -1352,7 +1309,7 @@ int main() {
       }
 
     float output21[32][19][19];
-    conv1x1(output9, output21, kernel18);
+    conv1x1(output9, 96, output21, 32, (float*)kernel18);
 
     //norm
     float scale17[32];
