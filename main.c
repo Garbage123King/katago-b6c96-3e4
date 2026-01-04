@@ -1069,16 +1069,7 @@ void forward(int board_size, b6c96_params* param, const float input[22][19][19],
       kernel19[i] = BINS[92].floats[n++];
     }
 
-    for(int i=0; i <19; i++)
-      for(int j=0; j <19; j++)
-      {
-        float s =0.0f;
-        for(int k=0; k<32; k++)
-        {
-          s += kernel19[k] * output22[k][i][j];
-        }
-        ownership[i][j] = s;
-      }
+    conv1x1((float*)output22, 32, (float*)ownership, 1, 19, (float*)kernel19);
 
 }
 
@@ -1228,20 +1219,30 @@ int main() {
     float maxdiff;
     int erri, errj, errk;
 
+    printf("checking 19x19 policy ...\n");
     printf("sumdiff: %f\n", err3((float*)out_policy, (const float*)policy, 2, 19, 19, &maxdiff, &erri, &errj, &errk));
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    printf("check 19x19 policy done.\n");
 
+    printf("checking 19x19 pass ...\n");
     printf("sumdiff: %f\n", err1((float*)out_pass, (const float*)pass, 2, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 19x19 pass done.\n");
 
+    printf("checking 19x19 value ...\n");
     printf("sumdiff: %f\n", err1((float*)out_value, (const float*)value, 3, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 19x19 value done.\n");
 
+    printf("checking 19x19 scorevalue ...\n");
     printf("sumdiff: %f\n", err1((float*)out_scorevalue, (const float*)scorevalue, 6, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 19x19 scorevalue done.\n");
 
+    printf("checking 19x19 ownership ...\n");
     printf("sumdiff: %f\n", err3((float*)out_ownership, (const float*)ownership, 1, 19, 19, &maxdiff, &erri, &errj, &errk));
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    printf("check 19x19 ownership done.\n");
 
     printf("19x19 done.\n");
 
@@ -1263,20 +1264,30 @@ int main() {
         }
       }
 
+    printf("checking 9x9 policy ...\n");
     printf("sumdiff: %f\n", err3((float*)out_policy9, (const float*)policy9, 2, 19, 19, &maxdiff, &erri, &errj, &errk));
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    printf("check 9x9 policy done.\n");
 
+    printf("checking 9x9 pass ...\n");
     printf("sumdiff: %f\n", err1((float*)out_pass9, (const float*)pass9, 2, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 9x9 pass done.\n");
 
+    printf("checking 9x9 value ...\n");
     printf("sumdiff: %f\n", err1((float*)out_value9, (const float*)value9, 3, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 9x9 value done.\n");
 
+    printf("checking 9x9 scorevalue ...\n");
     printf("sumdiff: %f\n", err1((float*)out_scorevalue9, (const float*)scorevalue9, 6, &maxdiff, &erri));
     printf("maxdiff: %f, %d\n", maxdiff, erri);
+    printf("check 9x9 scorevalue done.\n");
 
+    printf("checking 9x9 ownership ...\n");
     printf("sumdiff: %f\n", err3((float*)out_ownership9, (const float*)ownership9, 1, 19, 19, &maxdiff, &erri, &errj, &errk));
     printf("maxdiff: %f, %d, %d, %d\n", maxdiff, erri, errj, errk);
+    printf("check 9x9 ownership done.\n");
 
     printf("19x19 done.\n");
     
