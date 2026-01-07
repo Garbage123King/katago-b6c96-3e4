@@ -5,3 +5,4 @@ demo.exe
 demo
 raylib.dll
 raylib.h
+__pycache__

@@ -386,17 +386,6 @@ float err3(float *mat1, const float *mat2, int x, int y, int z, float *maxdiff, 
   return s;
 }
 
-void calcBias(const float input[96][19][19], float output[96][19][19], float bias[96])
-{
-  for (int i = 0; i < 96; i++) {
-    for (int j = 0; j < 19; j++) 
-      for (int k = 0; k < 19; k++){
-
-          output[i][j][k] = input[i][j][k] + bias[i];
-      }
-  }
-}
-
 void norm(const float (*input)[19][19], float (*output)[19][19], int channel, float *scale, float *bias, int board_size)
 {
     for (int i = 0; i < channel; i++) {
@@ -735,7 +724,7 @@ void forward(int board_size, b6c96_params* param, const float input[22][19][19],
     conv1x1((float*)inputGlobal, 19, (float*)output1, 96, 1, (float*)linear0);
 
     float output2[96][19][19];
-    calcBias(output0, output2, output1);
+    add_broadcast(output0, output2, output1, 96);
 
     // block阶段
     // 6个block分别是 ordi, ordi, gpool, ordi, gpool, ordi
