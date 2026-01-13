@@ -6,10 +6,10 @@ gcc -g main.c checkresult.c -o main -lz -Wl,--stack,67108864
 
 
 
-If you want to run 3D demo:
-1. Put raylib.h and raylib.dll here;
-2. Run command:
+If you want to run 3D demo, make sure `glslc` in your path and run:
 ```
-gcc demo.c -o demo.exe -L. -lraylib -lopengl32 -lgdi32 -lwinmm -mwindows
-./demo
+mkdir build
+cd build
+cmake -S .. -B . -G "Visual Studio 18 2026" -A x64
 ```
+
