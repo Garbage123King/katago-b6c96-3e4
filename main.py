@@ -299,6 +299,9 @@ output = linear(output_bak)
 adder = torch.tensor(bins[91]["floats"], dtype=torch.float32)
 output = output + adder
 
+scorevalue = torch.tensor(scorevalue, dtype=torch.float32).unsqueeze(0)
+diff(output, scorevalue)
+
 conv = load_conv(92, 1, 32, 1)
 output = conv(output_prepare)
 
@@ -421,8 +424,30 @@ class KataNet(nn.Module):
         self.p_norm_combine = nn.BatchNorm2d(32)
         self.p_conv_final = nn.Conv2d(32, 2, 1, bias=False)
         
-        # Pass & Value & Ownership (此处省略部分重复定义的层，逻辑同上)
-        # ... 可以根据需要继续添加 ...
+        # --- Pass Branch ---
+        self.pass_linear1 = nn.Linear(96, 32, bias=False)
+        self.pass_adder1 = nn.Parameter(torch.zeros(32))
+        self.pass_linear2 = nn.Linear(32, 2, bias=False)
+        
+        # --- Value & Score Branches ---
+        # 共同前置层
+        self.v_conv_prep = nn.Conv2d(96, 32, 1, bias=False)
+        self.v_norm_prep = nn.BatchNorm2d(32)
+        
+        # Value/Score 共享的全局融合层
+        self.v_linear_g = nn.Linear(96, 64, bias=False)
+        self.v_adder_g = nn.Parameter(torch.zeros(64))
+        
+        # Value 最终输出
+        self.v_linear_final = nn.Linear(64, 3, bias=False)
+        self.v_adder_final = nn.Parameter(torch.zeros(3))
+        
+        # Score 最终输出
+        self.s_linear_final = nn.Linear(64, 6, bias=False)
+        self.s_adder_final = nn.Parameter(torch.zeros(6))
+        
+        # --- Ownership Branch ---
+        self.own_conv_final = nn.Conv2d(32, 1, 1, bias=False)
 
     def apply_mask(self, tensor, board_size):
         """将棋盘范围外的区域清零"""
@@ -448,21 +473,43 @@ class KataNet(nn.Module):
         x = self.layer4(x, board_size)
         x = self.layer5(x, board_size)
         
-        x = torch.relu(self.final_norm(x))
+        trunk_out = torch.relu(self.final_norm(x))
         
-        # Policy 分支 (示例)
-        p1 = self.p_conv1(x)
-        p2 = torch.relu(self.apply_mask(self.p_norm2(self.p_conv2(x)), board_size))
-        p2_g = rowsG(p2, False, board_size)
-        p2_feat = self.p_linear_g(p2_g)
+        # 2. Policy Head
+        p1 = self.p_conv1(trunk_out)
+        p2 = self.apply_mask(self.p_norm2(self.p_conv2(trunk_out)), board_size)
+        p2 = torch.relu(p2)
+        p2_g_vec = rowsG(p2, False, board_size)
+        p2_feat = self.p_linear_g(p2_g_vec)
         
-        policy_out = p1 + p2_feat.view(p2_feat.size(0), p2_feat.size(1), 1, 1)
-        policy_out = self.p_norm_combine(policy_out)
-        policy_out = self.apply_mask(policy_out, board_size) # board_size外的清零
-        policy_out = torch.relu(policy_out)
-        final_policy_map = self.p_conv_final(policy_out) 
+        policy_hidden = p1 + p2_feat.view(p2_feat.size(0), p2_feat.size(1), 1, 1)
+        policy_hidden = torch.relu(self.apply_mask(self.p_norm_combine(policy_hidden), board_size))
+        policy = self.p_conv_final(policy_hidden)
 
-        return final_policy_map
+        # 3. Pass Branch
+        pass_out = self.pass_linear1(p2_g_vec)
+        pass_out = torch.relu(pass_out + self.pass_linear1.bias if self.pass_linear1.bias is not None else pass_out + self.pass_adder1)
+        pass_out = self.pass_linear2(pass_out)
+
+        # 4. Value / Score / Ownership Preparation
+        v_prep = self.apply_mask(self.v_norm_prep(self.v_conv_prep(trunk_out)), board_size)
+        v_prep = torch.relu(v_prep)
+        
+        # Value Head Global pooling (Value head use is_value_head=True)
+        v_g_vec = rowsG(v_prep, True, board_size)
+        v_hidden = self.v_linear_g(v_g_vec)
+        v_hidden = torch.relu(v_hidden + self.v_adder_g)
+        
+        # Value Output
+        value = self.v_linear_final(v_hidden) + self.v_adder_final
+        
+        # Score Output
+        scorevalue = self.s_linear_final(v_hidden) + self.s_adder_final
+        
+        # Ownership Output
+        ownership = self.own_conv_final(v_prep)
+
+        return policy, pass_out, value, scorevalue, ownership
         
 def load_weights_from_bins(model, bins):
     """
@@ -480,6 +527,9 @@ def load_weights_from_bins(model, bins):
     def set_linear_weight(layer, bin_idx, ic, oc):
         w = torch.tensor(bins[bin_idx]["floats"]).view(ic, oc).t()
         layer.weight.data.copy_(w)
+
+    def set_param(param, bin_idx):
+        param.data.copy_(torch.tensor(bins[bin_idx]["floats"]))
 
     # 按照你的脚本 index 开始赋值
     set_conv_weight(model.conv0, 0, 3, 22, 96)
@@ -536,17 +586,59 @@ def load_weights_from_bins(model, bins):
     set_norm_weight(model.p_norm_combine, 76, 77)
     set_conv_weight(model.p_conv_final, 78, 1, 32, 2)
 
+    # --- Pass Branch (Index 79-81) ---
+    set_linear_weight(model.pass_linear1, 79, 96, 32)
+    set_param(model.pass_adder1, 80)
+    set_linear_weight(model.pass_linear2, 81, 32, 2)
+
+    # --- Value/Score Preparation (Index 82-85) ---
+    set_conv_weight(model.v_conv_prep, 82, 1, 96, 32)
+    set_norm_weight(model.v_norm_prep, 84, 85)
+
+    # --- Value/Score Global Hidden (Index 86-87) ---
+    set_linear_weight(model.v_linear_g, 86, 96, 64)
+    set_param(model.v_adder_g, 87)
+
+    # --- Value Final (Index 88-89) ---
+    set_linear_weight(model.v_linear_final, 88, 64, 3)
+    set_param(model.v_adder_final, 89)
+
+    # --- Score Final (Index 90-91) ---
+    set_linear_weight(model.s_linear_final, 90, 64, 6)
+    set_param(model.s_adder_final, 91)
+
+    # --- Ownership (Index 92) ---
+    set_conv_weight(model.own_conv_final, 92, 1, 32, 1)
+
 
 model = KataNet()
 load_weights_from_bins(model, bins)
 model.eval() #必须要加这一行否则diff直接几千
-output = model(input19, inputGlobal19, 19)
-diff(output, policy19)
 
+# 执行推理
+with torch.no_grad():
+    policy_out, pass_out, v_out, s_out, own_out = model(input19, inputGlobal19, 19)
 
+# 验证各分支
+diff(policy_out, policy19)
+diff(pass_out, pass19)
+diff(v_out, value19)
+diff(s_out, scorevalue)
+diff(own_out, ownership)
+
+# 9x9棋盘
 input9=torch.tensor(input9, dtype=torch.float32).unsqueeze(0)
-inputGlobal9=torch.tensor(inputGlobal9, dtype=torch.float32).unsqueeze(0)
-output = model(input9, inputGlobal9, 9)
+
+with torch.no_grad():
+    policy_out, pass_out, v_out, s_out, own_out = model(input9, inputGlobal19, 9)
 
 policy9=torch.tensor(policy9, dtype=torch.float32).unsqueeze(0)
-diff(output, policy9)
+pass9=torch.tensor(pass9, dtype=torch.float32).unsqueeze(0)
+value9=torch.tensor(value9, dtype=torch.float32).unsqueeze(0)
+scorevalue9=torch.tensor(scorevalue9, dtype=torch.float32).unsqueeze(0)
+ownership9=torch.tensor(ownership9, dtype=torch.float32).unsqueeze(0)
+diff(policy_out, policy9)
+diff(pass_out, pass9)
+diff(v_out, value9)
+diff(s_out, scorevalue9)
+diff(own_out, ownership9)
