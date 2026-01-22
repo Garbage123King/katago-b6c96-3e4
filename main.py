@@ -170,31 +170,45 @@ def gpool(input, index0, index1, index2, index3, index4, index5, index6, index7,
     return output
 
 def rowsG(input_tensor, is_value_head, board_size):
-    """全局池化逻辑封装"""
+    """全局池化逻辑封装 - 支持混合 Batch Size"""
     batch_size, channels, h, w = input_tensor.shape
     device = input_tensor.device
     
-    mask = torch.zeros((h, w), device=device)
-    mask[:board_size, :board_size] = 1.0
+    # 1. 确保 board_size 是 Tensor 且形状为 [batch, 1, 1]
+    if not isinstance(board_size, torch.Tensor):
+        board_size = torch.tensor([board_size], device=device).repeat(batch_size)
+    b_size_float = board_size.float().view(batch_size, 1, 1)
+    
+    # 2. 生成 4D Mask: [batch, 1, h, w]
+    y = torch.arange(h, device=device).view(1, 1, h, 1)
+    x = torch.arange(w, device=device).view(1, 1, 1, w)
+    mask = (y < b_size_float.unsqueeze(1)) & (x < b_size_float.unsqueeze(1))
+    mask = mask.float() # 1.0 表示有效棋盘区域，0.0 表示填充区
+
+    # 3. 计算 Mean (每个样本有独立的分母)
+    # 针对每个样本的棋盘面积计算：size * size
+    area = b_size_float.view(batch_size, 1) ** 2 
     masked_input = input_tensor * mask
+    mean = torch.sum(masked_input, dim=(2, 3)) / area
     
-    # Mean
-    div = float(board_size * board_size)
-    mean = torch.sum(masked_input, dim=(2, 3)) / div
-    
-    # Max
-    temp = input_tensor + (mask - 1.0)
+    # 4. 计算 Max
+    # 为了排除填充区的干扰，将填充区的数值设为一个极小值 (如 -1e9)
+    # 这样填充区的 0 就不会影响棋盘内真实数据的最大值
+    large_negative = -1e9
+    temp = torch.where(mask > 0.5, input_tensor, torch.tensor(large_negative, device=device))
     max_val, _ = torch.max(temp.view(batch_size, channels, -1), dim=2)
 
-    sqrtdiv = float(board_size)
-    scaling_factor = (sqrtdiv - 14.0)
+    # 5. 计算 Scaling Factor (KataGo 特有的缩放逻辑)
+    scaling_factor = (b_size_float.view(batch_size, 1) - 14.0)
     
-    # 拼接通道: [batch, 32] -> [batch, 96]
+    # 6. 拼接通道
     ch1 = mean
     ch2 = mean * scaling_factor * 0.1
     if is_value_head:
+        # Value head 专用的全局特征
         ch3 = mean * (scaling_factor * scaling_factor * 0.01 - 0.1)
     else:
+        # Policy head 使用的 Max 特征
         ch3 = max_val
         
     return torch.cat([ch1, ch2, ch3], dim=1)
@@ -324,14 +338,27 @@ class OrdiBlock(nn.Module):
     
         
     def apply_mask(self, tensor, board_size):
-        """将棋盘范围外的区域清零"""
-        # 假设 tensor 形状为 [batch, channels, height, width]
-        # 如果当前输入的 H 或 W 大于 board_size，则执行 mask
-        if tensor.shape[2] > board_size or tensor.shape[3] > board_size:
-            # 这种切片赋值法在 inplace=True 时比较高效
-            tensor[:, :, board_size:, :] = 0
-            tensor[:, :, :, board_size:] = 0
-        return tensor
+        """
+        tensor: [batch, channels, H, W]
+        board_size: [batch] 形状的 Tensor
+        """
+        B, C, H, W = tensor.shape
+        device = tensor.device
+
+        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
+        # y shape: [H, 1], x shape: [1, W]
+        y = torch.arange(H, device=device).view(H, 1)
+        x = torch.arange(W, device=device).view(1, W)
+
+        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
+        b_size = board_size.view(B, 1, 1)
+
+        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
+        # 结果 shape: [batch, H, W]
+        mask = (y < b_size) & (x < b_size)
+
+        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
+        return tensor * mask.unsqueeze(1).float()
 
     def forward(self, x, board_size):
         identity = x
@@ -365,14 +392,27 @@ class GPoolBlock(nn.Module):
 
 
     def apply_mask(self, tensor, board_size):
-        """将棋盘范围外的区域清零"""
-        # 假设 tensor 形状为 [batch, channels, height, width]
-        # 如果当前输入的 H 或 W 大于 board_size，则执行 mask
-        if tensor.shape[2] > board_size or tensor.shape[3] > board_size:
-            # 这种切片赋值法在 inplace=True 时比较高效
-            tensor[:, :, board_size:, :] = 0
-            tensor[:, :, :, board_size:] = 0
-        return tensor
+        """
+        tensor: [batch, channels, H, W]
+        board_size: [batch] 形状的 Tensor
+        """
+        B, C, H, W = tensor.shape
+        device = tensor.device
+
+        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
+        # y shape: [H, 1], x shape: [1, W]
+        y = torch.arange(H, device=device).view(H, 1)
+        x = torch.arange(W, device=device).view(1, W)
+
+        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
+        b_size = board_size.view(B, 1, 1)
+
+        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
+        # 结果 shape: [batch, H, W]
+        mask = (y < b_size) & (x < b_size)
+
+        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
+        return tensor * mask.unsqueeze(1).float()
 
     def forward(self, x, board_size):
         identity = x
@@ -450,14 +490,27 @@ class KataNet(nn.Module):
         self.own_conv_final = nn.Conv2d(32, 1, 1, bias=False)
 
     def apply_mask(self, tensor, board_size):
-        """将棋盘范围外的区域清零"""
-        # 假设 tensor 形状为 [batch, channels, height, width]
-        # 如果当前输入的 H 或 W 大于 board_size，则执行 mask
-        if tensor.shape[2] > board_size or tensor.shape[3] > board_size:
-            # 这种切片赋值法在 inplace=True 时比较高效
-            tensor[:, :, board_size:, :] = 0
-            tensor[:, :, :, board_size:] = 0
-        return tensor
+        """
+        tensor: [batch, channels, H, W]
+        board_size: [batch] 形状的 Tensor
+        """
+        B, C, H, W = tensor.shape
+        device = tensor.device
+
+        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
+        # y shape: [H, 1], x shape: [1, W]
+        y = torch.arange(H, device=device).view(H, 1)
+        x = torch.arange(W, device=device).view(1, W)
+
+        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
+        b_size = board_size.view(B, 1, 1)
+
+        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
+        # 结果 shape: [batch, H, W]
+        mask = (y < b_size) & (x < b_size)
+
+        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
+        return tensor * mask.unsqueeze(1).float()
     
     def forward(self, img_input, global_input, board_size):
         # 初始融合
@@ -617,7 +670,7 @@ model.eval() #必须要加这一行否则diff直接几千
 
 # 执行推理
 with torch.no_grad():
-    policy_out, pass_out, v_out, s_out, own_out = model(input19, inputGlobal19, 19)
+    policy_out, pass_out, v_out, s_out, own_out = model(input19, inputGlobal19, torch.tensor(19, dtype=torch.float32))
 
 # 验证各分支
 diff(policy_out, policy19)
@@ -630,7 +683,7 @@ diff(own_out, ownership)
 input9=torch.tensor(input9, dtype=torch.float32).unsqueeze(0)
 
 with torch.no_grad():
-    policy_out, pass_out, v_out, s_out, own_out = model(input9, inputGlobal19, 9)
+    policy_out, pass_out, v_out, s_out, own_out = model(input9, inputGlobal19, torch.tensor(9, dtype=torch.float32))
 
 policy9=torch.tensor(policy9, dtype=torch.float32).unsqueeze(0)
 pass9=torch.tensor(pass9, dtype=torch.float32).unsqueeze(0)
@@ -642,3 +695,18 @@ diff(pass_out, pass9)
 diff(v_out, value9)
 diff(s_out, scorevalue9)
 diff(own_out, ownership9)
+
+inputGlobal9 = torch.tensor(inputGlobal9, dtype=torch.float32).unsqueeze(0)
+print(type(inputGlobal19))
+print(type(inputGlobal9))
+batch_input = torch.cat([input19,input9], dim=0)
+batch_inputGlobal = torch.cat([inputGlobal19,inputGlobal9], dim=0)
+batch_sizes = torch.tensor([19,9], dtype=torch.float32)
+with torch.no_grad():
+    policy_out, pass_out, v_out, s_out, own_out = model(batch_input, batch_inputGlobal, batch_sizes)
+diff(policy_out[1], policy9)
+diff(pass_out[1], pass9)
+diff(v_out[1], value9)
+diff(s_out[1], scorevalue9)
+diff(own_out[1], ownership9)
+
