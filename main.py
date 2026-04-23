@@ -4,6 +4,7 @@ import shutil
 import struct
 import torch.nn as nn
 from checkresult import *
+import torch.nn.functional as F
 
 gzfile = "model3e4.bin.gz"
 binfile = "model3e4.bin"
@@ -326,6 +327,37 @@ diff(output, ownership)
 #class版
 print("开始class版")
 
+def class_rowsG(input_tensor, is_value_head, mask):
+    """全局池化逻辑封装 - 使用传入的 mask [batch, 1, h, w]"""
+    batch_size, channels, h, w = input_tensor.shape
+    device = input_tensor.device
+    
+    # 计算有效面积 (mask 为 1.0 的点总数)
+    area = torch.sum(mask, dim=(2, 3)).view(batch_size, 1) 
+    # 避免除以 0
+    area = torch.clamp(area, min=1.0)
+    
+    masked_input = input_tensor * mask
+    mean = torch.sum(masked_input, dim=(2, 3)) / area
+    
+    # 计算 Max：填充区设为极小值
+    large_negative = -1e9
+    temp = torch.where(mask > 0.5, input_tensor, torch.tensor(large_negative, device=device))
+    max_val, _ = torch.max(temp.view(batch_size, channels, -1), dim=2)
+
+    # 计算 Scaling Factor (根据面积推算 size)
+    current_size = torch.sqrt(area)
+    scaling_factor = (current_size - 14.0)
+    
+    ch1 = mean
+    ch2 = mean * scaling_factor * 0.1
+    if is_value_head:
+        ch3 = mean * (scaling_factor * scaling_factor * 0.01 - 0.1)
+    else:
+        ch3 = max_val
+        
+    return torch.cat([ch1, ch2, ch3], dim=1)
+
 class OrdiBlock(nn.Module):
     def __init__(self, channels=96):
         super().__init__()
@@ -336,39 +368,15 @@ class OrdiBlock(nn.Module):
         self.relu2 = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
     
-        
-    def apply_mask(self, tensor, board_size):
-        """
-        tensor: [batch, channels, H, W]
-        board_size: [batch] 形状的 Tensor
-        """
-        B, C, H, W = tensor.shape
-        device = tensor.device
-
-        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
-        # y shape: [H, 1], x shape: [1, W]
-        y = torch.arange(H, device=device).view(H, 1)
-        x = torch.arange(W, device=device).view(1, W)
-
-        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
-        b_size = board_size.view(B, 1, 1)
-
-        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
-        # 结果 shape: [batch, H, W]
-        mask = (y < b_size) & (x < b_size)
-
-        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
-        return tensor * mask.unsqueeze(1).float()
-
-    def forward(self, x, board_size):
+    def forward(self, x, mask):
         identity = x
         out = self.norm1(x)
-        out = self.apply_mask(out, board_size) # board_size外的清零
-        out = self.relu1(out)
+        out = out * mask # 使用传入的 mask
+        out = F.relu(out, inplace=True)
         out = self.conv1(out)
         out = self.norm2(out)
-        out = self.apply_mask(out, board_size) # board_size外的清零
-        out = self.relu2(out)
+        out = out * mask
+        out = F.relu(out, inplace=True)
         out = self.conv2(out)
         return out + identity
 
@@ -389,52 +397,19 @@ class GPoolBlock(nn.Module):
         self.norm2 = nn.BatchNorm2d(mid_ch_c)
         self.relu2 = nn.ReLU(inplace=True)
         self.conv_final = nn.Conv2d(mid_ch_c, in_ch, 3, padding=1, bias=False)
-
-
-    def apply_mask(self, tensor, board_size):
-        """
-        tensor: [batch, channels, H, W]
-        board_size: [batch] 形状的 Tensor
-        """
-        B, C, H, W = tensor.shape
-        device = tensor.device
-
-        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
-        # y shape: [H, 1], x shape: [1, W]
-        y = torch.arange(H, device=device).view(H, 1)
-        x = torch.arange(W, device=device).view(1, W)
-
-        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
-        b_size = board_size.view(B, 1, 1)
-
-        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
-        # 结果 shape: [batch, H, W]
-        mask = (y < b_size) & (x < b_size)
-
-        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
-        return tensor * mask.unsqueeze(1).float()
-
-    def forward(self, x, board_size):
+    
+    def forward(self, x, mask):
         identity = x
-        out = self.norm1(x)
-        out = self.apply_mask(out, board_size) # board_size外的清零
-        out = self.relu1(out)
+        out = F.relu(self.norm1(x) * mask, inplace=True)
         
         main_feat = self.conv_main(out)
         
-        # GPool 分支
-        g = self.conv_gpool(out)
-        g = self.norm_g(g)
-        g = self.apply_mask(g, board_size) # board_size外的清零
-        g = self.relu_g(g)
-        g_vec = rowsG(g, False, board_size)
+        g = F.relu(self.norm_g(self.conv_gpool(out)) * mask, inplace=True)
+        g_vec = class_rowsG(g, False, mask)
         g_feat = self.linear_g(g_vec)
         
-        # 融合
         out = main_feat + g_feat.view(g_feat.size(0), g_feat.size(1), 1, 1)
-        out = self.norm2(out)
-        out = self.apply_mask(out, board_size) # board_size外的清零
-        out = self.relu2(out)
+        out = F.relu(self.norm2(out) * mask, inplace=True)
         out = self.conv_final(out)
         return out + identity
 
@@ -488,55 +463,36 @@ class KataNet(nn.Module):
         
         # --- Ownership Branch ---
         self.own_conv_final = nn.Conv2d(32, 1, 1, bias=False)
-
-    def apply_mask(self, tensor, board_size):
-        """
-        tensor: [batch, channels, H, W]
-        board_size: [batch] 形状的 Tensor
-        """
-        B, C, H, W = tensor.shape
-        device = tensor.device
-
-        # 1. 生成坐标网格 (0, 1, 2, ..., H-1)
-        # y shape: [H, 1], x shape: [1, W]
-        y = torch.arange(H, device=device).view(H, 1)
-        x = torch.arange(W, device=device).view(1, W)
-
-        # 2. 将 board_size 扩展为 [batch, 1, 1] 方便广播比较
-        b_size = board_size.view(B, 1, 1)
-
-        # 3. 生成掩码：只有坐标小于对应 size 的位置才为 True (1)
-        # 结果 shape: [batch, H, W]
-        mask = (y < b_size) & (x < b_size)
-
-        # 4. 将 mask 扩展到 channel 维度 [batch, 1, H, W] 并乘到原图上
-        return tensor * mask.unsqueeze(1).float()
     
-    def forward(self, img_input, global_input, board_size):
+    def forward(self, img_input, global_input):
+        # 1. 提取 Mask：假设 input[0] 通道中 == 1.0f 的点是有效区域
+        # shape: [batch, 1, 20, 20]
+        mask = (img_input[:, 0:1, :, :] > 0.5).float()
+
         # 初始融合
         x = self.conv0(img_input)
         g_feat = self.linear0(global_input)
         x = x + g_feat.view(g_feat.size(0), g_feat.size(1), 1, 1)
         
         # 特征提取
-        x = self.layer0(x, board_size)
-        x = self.layer1(x, board_size)
-        x = self.layer2(x, board_size)
-        x = self.layer3(x, board_size)
-        x = self.layer4(x, board_size)
-        x = self.layer5(x, board_size)
+        x = self.layer0(x, mask)
+        x = self.layer1(x, mask)
+        x = self.layer2(x, mask)
+        x = self.layer3(x, mask)
+        x = self.layer4(x, mask)
+        x = self.layer5(x, mask)
         
         trunk_out = torch.relu(self.final_norm(x))
         
         # 2. Policy Head
         p1 = self.p_conv1(trunk_out)
-        p2 = self.apply_mask(self.p_norm2(self.p_conv2(trunk_out)), board_size)
+        p2 = self.p_norm2(self.p_conv2(trunk_out)) * mask
         p2 = torch.relu(p2)
-        p2_g_vec = rowsG(p2, False, board_size)
+        p2_g_vec = class_rowsG(p2, False, mask)
         p2_feat = self.p_linear_g(p2_g_vec)
         
         policy_hidden = p1 + p2_feat.view(p2_feat.size(0), p2_feat.size(1), 1, 1)
-        policy_hidden = torch.relu(self.apply_mask(self.p_norm_combine(policy_hidden), board_size))
+        policy_hidden = torch.relu(self.p_norm_combine(policy_hidden) * mask)
         policy = self.p_conv_final(policy_hidden)
 
         # 3. Pass Branch
@@ -545,11 +501,11 @@ class KataNet(nn.Module):
         pass_out = self.pass_linear2(pass_out)
 
         # 4. Value / Score / Ownership Preparation
-        v_prep = self.apply_mask(self.v_norm_prep(self.v_conv_prep(trunk_out)), board_size)
+        v_prep = torch.relu(self.v_norm_prep(self.v_conv_prep(trunk_out)) * mask)
         v_prep = torch.relu(v_prep)
         
         # Value Head Global pooling (Value head use is_value_head=True)
-        v_g_vec = rowsG(v_prep, True, board_size)
+        v_g_vec = class_rowsG(v_prep, True, mask)
         v_hidden = self.v_linear_g(v_g_vec)
         v_hidden = torch.relu(v_hidden + self.v_adder_g)
         
@@ -670,7 +626,7 @@ model.eval() #必须要加这一行否则diff直接几千
 
 # 执行推理
 with torch.no_grad():
-    policy_out, pass_out, v_out, s_out, own_out = model(input19, inputGlobal19, torch.tensor(19, dtype=torch.float32))
+    policy_out, pass_out, v_out, s_out, own_out = model(input19, inputGlobal19)
 
 # 验证各分支
 diff(policy_out, policy19)
@@ -683,7 +639,7 @@ diff(own_out, ownership)
 input9=torch.tensor(input9, dtype=torch.float32).unsqueeze(0)
 
 with torch.no_grad():
-    policy_out, pass_out, v_out, s_out, own_out = model(input9, inputGlobal19, torch.tensor(9, dtype=torch.float32))
+    policy_out, pass_out, v_out, s_out, own_out = model(input9, inputGlobal19)
 
 policy9=torch.tensor(policy9, dtype=torch.float32).unsqueeze(0)
 pass9=torch.tensor(pass9, dtype=torch.float32).unsqueeze(0)
@@ -701,9 +657,16 @@ print(type(inputGlobal19))
 print(type(inputGlobal9))
 batch_input = torch.cat([input19,input9], dim=0)
 batch_inputGlobal = torch.cat([inputGlobal19,inputGlobal9], dim=0)
-batch_sizes = torch.tensor([19,9], dtype=torch.float32)
+# batch_sizes = torch.tensor([19,9], dtype=torch.float32)
 with torch.no_grad():
-    policy_out, pass_out, v_out, s_out, own_out = model(batch_input, batch_inputGlobal, batch_sizes)
+    policy_out, pass_out, v_out, s_out, own_out = model(batch_input, batch_inputGlobal)
+print("batch[0] 19x19:")
+diff(policy_out[0], policy19)
+diff(pass_out[0], pass19)
+diff(v_out[0], value19)
+diff(s_out[0], scorevalue)
+diff(own_out[0], ownership)
+print("batch[1] 9x9:")
 diff(policy_out[1], policy9)
 diff(pass_out[1], pass9)
 diff(v_out[1], value9)
